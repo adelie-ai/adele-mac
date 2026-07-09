@@ -5,11 +5,29 @@ struct ContentView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.connected {
-            ChatSplitView()
-        } else {
-            ConnectView()
+        Group {
+            if model.connected {
+                ChatSplitView()
+            } else {
+                ConnectView()
+            }
         }
+        .overlay(alignment: .top) {
+            if let toast = model.toast {
+                Text(toast)
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(.regularMaterial, in: Capsule())
+                    .overlay(Capsule().strokeBorder(.separator))
+                    .shadow(radius: 8, y: 4)
+                    .padding(.top, 12)
+                    .frame(maxWidth: 420)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: model.toast)
     }
 }
 
@@ -265,6 +283,19 @@ private struct MessageBubble: View {
     let message: DisplayMessage
 
     var body: some View {
+        if message.isNote {
+            Text(message.content)
+                .font(.callout)
+                .italic()
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.vertical, 2)
+        } else {
+            bubble
+        }
+    }
+
+    private var bubble: some View {
         HStack {
             if message.isUser { Spacer(minLength: 40) }
             Group {
