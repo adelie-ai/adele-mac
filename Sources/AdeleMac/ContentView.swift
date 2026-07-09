@@ -28,6 +28,7 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.3), value: model.toast)
+        .onAppear { model.autoReconnect() }
     }
 }
 
@@ -44,10 +45,44 @@ private struct ConnectView: View {
                 .foregroundStyle(.tint)
             Text("Connect to Adele")
                 .font(.title2.weight(.semibold))
-            Text("Enter the WebSocket address of a running desktop-assistant daemon.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+
+            if !model.profiles.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Saved connections")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(model.profiles) { profile in
+                        Button {
+                            model.connect(using: profile)
+                        } label: {
+                            HStack {
+                                Image(systemName: "network")
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(profile.name)
+                                    Text(profile.wsURL).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .padding(8)
+                        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+                        .contextMenu {
+                            Button("Delete", role: .destructive) { model.deleteProfile(profile) }
+                        }
+                    }
+                }
+                .frame(maxWidth: 360)
+                Text("or connect manually")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Enter the WebSocket address of a running desktop-assistant daemon.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
 
             VStack(spacing: 8) {
                 TextField("ws://host:port/ws", text: $model.serverAddress)
@@ -107,6 +142,26 @@ private struct ChatSplitView: View {
             ChatPane()
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                if model.profiles.count > 1 || model.currentProfile != nil {
+                    Menu {
+                        ForEach(model.profiles) { profile in
+                            Button {
+                                model.switchProfile(profile)
+                            } label: {
+                                if profile.id == model.currentProfileID {
+                                    Label(profile.name, systemImage: "checkmark")
+                                } else {
+                                    Text(profile.name)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(model.currentProfile?.name ?? "Connection", systemImage: "network")
+                    }
+                    .help("Switch connection")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 TasksButton()
             }
