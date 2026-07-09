@@ -118,6 +118,7 @@ private struct ConnectView: View {
 
 private struct ChatSplitView: View {
     @Environment(AppModel.self) private var model
+    @State private var pendingDelete: ConversationSummary?
 
     var body: some View {
         @Bindable var model = model
@@ -131,7 +132,7 @@ private struct ChatSplitView: View {
                         .tag(convo.id)
                         .contextMenu {
                             Button("Delete", role: .destructive) {
-                                model.deleteConversation(convo.id)
+                                pendingDelete = convo
                             }
                         }
                 }
@@ -140,6 +141,19 @@ private struct ChatSplitView: View {
             .navigationSplitViewColumnWidth(min: 200, ideal: 260)
         } detail: {
             ChatPane()
+        }
+        .confirmationDialog(
+            "Delete this conversation?",
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            presenting: pendingDelete
+        ) { convo in
+            Button("Delete", role: .destructive) { model.deleteConversation(convo.id) }
+            Button("Cancel", role: .cancel) {}
+        } message: { convo in
+            Text(convo.title.isEmpty ? "New Conversation" : convo.title)
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {
@@ -430,7 +444,12 @@ private struct ComposerView: View {
                 .lineLimit(1...6)
                 .padding(8)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .onSubmit { model.send() }
+                .onKeyPress(keys: [.return]) { press in
+                    // Return sends; Shift+Return inserts a newline.
+                    if press.modifiers.contains(.shift) { return .ignored }
+                    model.send()
+                    return .handled
+                }
             Button {
                 model.send()
             } label: {

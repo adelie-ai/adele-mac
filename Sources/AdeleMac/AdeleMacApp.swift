@@ -35,6 +35,13 @@ struct AdeleMacApp: App {
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(!model.connected)
             }
+            CommandGroup(after: .sidebar) {
+                Button(model.showScratchpad ? "Hide Scratchpad" : "Show Scratchpad") {
+                    model.showScratchpad.toggle()
+                }
+                .keyboardShortcut("s", modifiers: [.command, .option])
+                .disabled(!model.connected)
+            }
         }
     }
 }
