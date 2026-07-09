@@ -41,12 +41,29 @@ swift run AdeleMac
 The app opens a connect screen; enter the daemon's WebSocket URL
 (default `ws://127.0.0.1:11339/ws`) and connect.
 
-## Status — Phase 1 (walking skeleton) ✅ validated end-to-end
+## Status
 
-Implemented: FFI build integration, `AdeleCore` wrapper, `/login`→JWT auth,
-WebSocket connect, streaming chat (plain text), conversation sidebar (new /
-select / delete), chat status + send gating. Verified against a live
-`desktop-assistant-daemon` (streamed a real assistant reply via `AdeleSmoke`).
+Validated end-to-end against a live `desktop-assistant-daemon` (streamed replies,
+model listing, voice) via `AdeleSmoke`.
+
+**Done**
+- **Phase 1** — FFI integration, `AdeleCore` wrapper, `/login`→JWT auth, WS
+  connect, streaming chat, conversation sidebar (new/select/delete), send gating.
+- **Phase 2** — native Markdown rendering, model picker (+ reasoning effort),
+  context-usage readout, background tasks panel (list/progress/cancel/logs),
+  scratchpad inspector, toasts + inline notes.
+- **Phase 3 (partial)** — connection profiles + macOS Keychain + auto-reconnect +
+  in-app profile switching.
+- **Phase 4 (output)** — Adele speaks replies via `AVSpeechSynthesizer`, with a
+  per-conversation output-level control.
+- **UX** — Return-to-send (Shift+Return newline), delete confirmation, Cmd-N /
+  Cmd-Opt-S shortcuts.
+
+**Remaining toward GTK parity**
+- Settings / management UI (connections, API keys, knowledge base, purposes,
+  personality) — rides a separate management API not yet exposed via the FFI.
+- OAuth login flow; multi-window; voice **input** (STT capture).
+- Distribution: universal static lib, signed/notarized `.app`, Homebrew cask.
 
 ### Auth (macOS)
 
