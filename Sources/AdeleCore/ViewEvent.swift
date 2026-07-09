@@ -131,6 +131,40 @@ public struct SelectedModel: Decodable, Hashable, Sendable {
     }
 }
 
+/// A background task (only the fields the UI uses; `kind`/`parent`/`children`
+/// are not decoded).
+public struct TaskView: Decodable, Identifiable, Hashable, Sendable {
+    public let id: String
+    /// "pending" | "running" | "completed" | "failed" | "cancelled".
+    public var status: String
+    public let title: String
+    public var progressHint: String?
+    public let lastError: String?
+    public let startedAt: Int64
+
+    enum CodingKeys: String, CodingKey {
+        case id, status, title
+        case progressHint = "progress_hint"
+        case lastError = "last_error"
+        case startedAt = "started_at"
+    }
+
+    public var isActive: Bool { status == "pending" || status == "running" }
+}
+
+/// A single background-task log line.
+public struct TaskLogEntry: Decodable, Identifiable, Hashable, Sendable {
+    public let seq: UInt64
+    public let timestamp: Int64
+    /// "trace" | "debug" | "info" | "warn" | "error".
+    public let level: String
+    public let message: String
+
+    public var id: UInt64 { seq }
+
+    enum CodingKeys: String, CodingKey { case seq, timestamp, level, message }
+}
+
 /// One pushed view-update from the core.
 public enum ViewEvent: Decodable, Sendable {
     case connected(label: String)
@@ -151,14 +185,21 @@ public enum ViewEvent: Decodable, Sendable {
     case modelSelection(ModelSelection?)
     case defaultModel(SelectedModel?)
     case modelPickerVisible(Bool)
+    case tasksReplaceAll([TaskView])
+    case taskStarted(TaskView)
+    case taskProgress(id: String, progressHint: String?)
+    case taskLogAppended(id: String, entry: TaskLogEntry)
+    case taskCompleted(id: String)
+    case taskLogs(id: String, entries: [TaskLogEntry])
     case toast(text: String)
     case inlineNote(text: String)
-    /// Any event not yet typed (tasks, scratchpad, voice, …).
+    /// Any event not yet typed (scratchpad, voice, …).
     case unknown(type: String)
 
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
-        case selection, model
+        case selection, model, task, id, entry, entries
+        case progressHint = "progress_hint"
     }
 
     public init(from decoder: Decoder) throws {
@@ -201,6 +242,27 @@ public enum ViewEvent: Decodable, Sendable {
             self = .defaultModel(try c.decodeIfPresent(SelectedModel.self, forKey: .model))
         case "model_picker_visible":
             self = .modelPickerVisible(try c.decode(Bool.self, forKey: .value))
+        case "tasks_replace_all":
+            self = .tasksReplaceAll(try c.decode([TaskView].self, forKey: .items))
+        case "task_started":
+            self = .taskStarted(try c.decode(TaskView.self, forKey: .task))
+        case "task_progress":
+            self = .taskProgress(
+                id: try c.decode(String.self, forKey: .id),
+                progressHint: try c.decodeIfPresent(String.self, forKey: .progressHint)
+            )
+        case "task_log_appended":
+            self = .taskLogAppended(
+                id: try c.decode(String.self, forKey: .id),
+                entry: try c.decode(TaskLogEntry.self, forKey: .entry)
+            )
+        case "task_completed":
+            self = .taskCompleted(id: try c.decode(String.self, forKey: .id))
+        case "task_logs":
+            self = .taskLogs(
+                id: try c.decode(String.self, forKey: .id),
+                entries: try c.decode([TaskLogEntry].self, forKey: .entries)
+            )
         case "toast":
             self = .toast(text: try c.decode(String.self, forKey: .text))
         case "inline_note":

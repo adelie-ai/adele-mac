@@ -47,6 +47,11 @@ final class AppModel {
     var defaultModel: SelectedModel?
     var modelPickerVisible = false
 
+    // Background tasks
+    var tasks: [TaskView] = []
+    var taskLogs: [String: [TaskLogEntry]] = [:]
+    var activeTaskCount: Int { tasks.filter(\.isActive).count }
+
     // Composer
     var draft = ""
 
@@ -140,6 +145,24 @@ final class AppModel {
             && selection.modelId == listing.model.id
     }
 
+    // MARK: - Tasks
+
+    func cancelTask(_ id: String) {
+        core.cancelTask(id)
+    }
+
+    func fetchTaskLogs(_ id: String) {
+        core.fetchTaskLogs(id)
+    }
+
+    private func upsertTask(_ task: TaskView) {
+        if let idx = tasks.firstIndex(where: { $0.id == task.id }) {
+            tasks[idx] = task
+        } else {
+            tasks.append(task)
+        }
+    }
+
     var selectedListing: ModelListing? {
         guard let selection = modelSelection else { return nil }
         return models.first {
@@ -220,6 +243,30 @@ final class AppModel {
 
         case .modelPickerVisible(let value):
             modelPickerVisible = value
+
+        case .tasksReplaceAll(let items):
+            tasks = items
+
+        case .taskStarted(let task):
+            upsertTask(task)
+
+        case .taskProgress(let id, let hint):
+            if let idx = tasks.firstIndex(where: { $0.id == id }) {
+                tasks[idx].progressHint = hint
+            }
+
+        case .taskLogAppended(let id, let entry):
+            taskLogs[id, default: []].append(entry)
+
+        case .taskCompleted(let id):
+            // The terminal event carries only the id; a later tasks_replace_all
+            // corrects the precise status (completed/failed/cancelled).
+            if let idx = tasks.firstIndex(where: { $0.id == id }), tasks[idx].isActive {
+                tasks[idx].status = "completed"
+            }
+
+        case .taskLogs(let id, let entries):
+            taskLogs[id] = entries
 
         case .addUserMessage(let content):
             appendUser(content)
