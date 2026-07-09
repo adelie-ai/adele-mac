@@ -219,6 +219,11 @@ public enum ViewEvent: Decodable, Sendable {
     case taskCompleted(id: String)
     case taskLogs(id: String, entries: [TaskLogEntry])
     case scratchpad([ScratchpadNote])
+    /// Speak `text` aloud (the client owns text-to-speech).
+    case speak(text: String)
+    /// Reflect the active conversation's Adele-output level on the control:
+    /// "disabled" | "on_demand" | "always".
+    case adeleOutputDropdown(level: String)
     case toast(text: String)
     case inlineNote(text: String)
     /// Any event not yet typed (scratchpad, voice, …).
@@ -226,7 +231,7 @@ public enum ViewEvent: Decodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
-        case selection, model, task, id, entry, entries, notes
+        case selection, model, task, id, entry, entries, notes, level
         case progressHint = "progress_hint"
     }
 
@@ -293,6 +298,10 @@ public enum ViewEvent: Decodable, Sendable {
             )
         case "scratchpad":
             self = .scratchpad(try c.decode([ScratchpadNote].self, forKey: .notes))
+        case "speak":
+            self = .speak(text: try c.decode(String.self, forKey: .text))
+        case "adele_output_dropdown":
+            self = .adeleOutputDropdown(level: try c.decode(String.self, forKey: .level))
         case "toast":
             self = .toast(text: try c.decode(String.self, forKey: .text))
         case "inline_note":

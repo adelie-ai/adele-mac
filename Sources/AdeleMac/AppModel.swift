@@ -59,6 +59,11 @@ final class AppModel {
     var scratchpad: [ScratchpadNote] = []
     var showScratchpad = false
 
+    // Voice output (Adele speaks)
+    private let speaker = Speaker()
+    /// "disabled" | "on_demand" | "always".
+    var adeleOutputLevel = "disabled"
+
     // Transient toast
     var toast: String?
     private var toastTask: Task<Void, Never>?
@@ -196,6 +201,19 @@ final class AppModel {
         guard !text.isEmpty, sendEnabled else { return }
         draft = ""
         core.sendPrompt(text)
+    }
+
+    /// Set the Adele-output (spoken reply) level for the open conversation:
+    /// "disabled" | "on_demand" | "always".
+    func setAdeleOutput(_ level: String) {
+        guard let id = selectedConversationID else { return }
+        adeleOutputLevel = level
+        core.setAdeleOutput(conversationID: id, level: level)
+        if level == "disabled" { speaker.stop() }
+    }
+
+    func stopSpeaking() {
+        speaker.stop()
     }
 
     func selectModel(_ listing: ModelListing, effort: String = "") {
@@ -370,6 +388,12 @@ final class AppModel {
 
         case .complete(let text):
             completeStreaming(text)
+
+        case .speak(let text):
+            speaker.speak(text)
+
+        case .adeleOutputDropdown(let level):
+            adeleOutputLevel = level
 
         case .toast(let text):
             showToast(text)
