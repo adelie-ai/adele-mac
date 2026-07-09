@@ -145,6 +145,7 @@ private struct ChatPane: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        @Bindable var model = model
         VStack(spacing: 0) {
             if model.selectedConversationID == nil {
                 ContentUnavailableView(
@@ -159,6 +160,10 @@ private struct ChatPane: View {
             }
         }
         .navigationTitle("Adele")
+        .inspector(isPresented: $model.showScratchpad) {
+            ScratchpadView()
+                .inspectorColumnWidth(min: 220, ideal: 280)
+        }
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if model.selectedConversationID != nil, !model.models.isEmpty {
@@ -169,6 +174,14 @@ private struct ChatPane: View {
                 if let usage = model.contextUsage {
                     ContextUsageReadout(usage: usage)
                 }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.showScratchpad.toggle()
+                } label: {
+                    Label("Scratchpad", systemImage: "note.text")
+                }
+                .help("Show scratchpad")
             }
         }
     }

@@ -165,6 +165,33 @@ public struct TaskLogEntry: Decodable, Identifiable, Hashable, Sendable {
     enum CodingKeys: String, CodingKey { case seq, timestamp, level, message }
 }
 
+/// A scratchpad note (per-conversation working memory the assistant maintains).
+public struct ScratchpadNote: Decodable, Identifiable, Hashable, Sendable {
+    public let id: String
+    public let key: String
+    public let content: String
+    public let noteType: String
+    public let sequence: Int32?
+    public let done: Bool
+    public let updatedAt: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, key, content, sequence, done
+        case noteType = "note_type"
+        case updatedAt = "updated_at"
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        key = try c.decode(String.self, forKey: .key)
+        content = try c.decode(String.self, forKey: .content)
+        noteType = (try? c.decode(String.self, forKey: .noteType)) ?? "note"
+        sequence = try c.decodeIfPresent(Int32.self, forKey: .sequence)
+        done = (try? c.decode(Bool.self, forKey: .done)) ?? false
+        updatedAt = try c.decode(String.self, forKey: .updatedAt)
+    }
+}
+
 /// One pushed view-update from the core.
 public enum ViewEvent: Decodable, Sendable {
     case connected(label: String)
@@ -191,6 +218,7 @@ public enum ViewEvent: Decodable, Sendable {
     case taskLogAppended(id: String, entry: TaskLogEntry)
     case taskCompleted(id: String)
     case taskLogs(id: String, entries: [TaskLogEntry])
+    case scratchpad([ScratchpadNote])
     case toast(text: String)
     case inlineNote(text: String)
     /// Any event not yet typed (scratchpad, voice, …).
@@ -198,7 +226,7 @@ public enum ViewEvent: Decodable, Sendable {
 
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
-        case selection, model, task, id, entry, entries
+        case selection, model, task, id, entry, entries, notes
         case progressHint = "progress_hint"
     }
 
@@ -263,6 +291,8 @@ public enum ViewEvent: Decodable, Sendable {
                 id: try c.decode(String.self, forKey: .id),
                 entries: try c.decode([TaskLogEntry].self, forKey: .entries)
             )
+        case "scratchpad":
+            self = .scratchpad(try c.decode([ScratchpadNote].self, forKey: .notes))
         case "toast":
             self = .toast(text: try c.decode(String.self, forKey: .text))
         case "inline_note":

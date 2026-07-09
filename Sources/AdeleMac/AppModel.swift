@@ -55,6 +55,10 @@ final class AppModel {
     var taskLogs: [String: [TaskLogEntry]] = [:]
     var activeTaskCount: Int { tasks.filter(\.isActive).count }
 
+    // Scratchpad side pane
+    var scratchpad: [ScratchpadNote] = []
+    var showScratchpad = false
+
     // Transient toast
     var toast: String?
     private var toastTask: Task<Void, Never>?
@@ -274,6 +278,9 @@ final class AppModel {
 
         case .taskLogs(let id, let entries):
             taskLogs[id] = entries
+
+        case .scratchpad(let notes):
+            scratchpad = notes
 
         case .addUserMessage(let content):
             appendUser(content)
