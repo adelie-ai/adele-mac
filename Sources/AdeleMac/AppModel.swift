@@ -11,6 +11,9 @@ struct DisplayMessage: Identifiable, Hashable {
     var streaming: Bool = false
 
     var isUser: Bool { role == "user" }
+    /// An inline transcript note (e.g. a "(speech mode disabled)" downgrade),
+    /// rendered centered rather than as a chat bubble.
+    var isNote: Bool { role == "note" }
 }
 
 /// The app's render state. Holds the single `AdeleCore` for the process lifetime
@@ -51,6 +54,10 @@ final class AppModel {
     var tasks: [TaskView] = []
     var taskLogs: [String: [TaskLogEntry]] = [:]
     var activeTaskCount: Int { tasks.filter(\.isActive).count }
+
+    // Transient toast
+    var toast: String?
+    private var toastTask: Task<Void, Never>?
 
     // Composer
     var draft = ""
@@ -277,9 +284,24 @@ final class AppModel {
         case .complete(let text):
             completeStreaming(text)
 
-        case .toast, .inlineNote, .unknown:
-            // Phase 1: no dedicated surface yet.
+        case .toast(let text):
+            showToast(text)
+
+        case .inlineNote(let text):
+            messages.append(DisplayMessage(id: freshID(), role: "note", content: text))
+
+        case .unknown:
             break
+        }
+    }
+
+    private func showToast(_ text: String) {
+        toast = text
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
         }
     }
 
