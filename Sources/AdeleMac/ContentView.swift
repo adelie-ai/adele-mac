@@ -139,14 +139,80 @@ private struct ChatPane: View {
         }
         .navigationTitle("Adele")
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                if model.selectedConversationID != nil, !model.models.isEmpty {
+                    ModelPicker()
+                }
+            }
             ToolbarItem(placement: .status) {
-                if let readout = model.contextReadout {
-                    Text(readout)
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                if let usage = model.contextUsage {
+                    ContextUsageReadout(usage: usage)
                 }
             }
         }
+    }
+}
+
+private struct ModelPicker: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Menu {
+            ForEach(model.modelsByConnection, id: \.label) { group in
+                Section(group.label) {
+                    ForEach(group.listings) { listing in
+                        Button {
+                            model.selectModel(listing)
+                        } label: {
+                            if model.isSelected(listing) {
+                                Label(listing.model.displayName, systemImage: "checkmark")
+                            } else {
+                                Text(listing.model.displayName)
+                            }
+                        }
+                    }
+                }
+            }
+            if let selected = model.selectedListing, selected.model.capabilities.reasoning {
+                Divider()
+                Menu("Reasoning Effort") {
+                    ForEach(["low", "medium", "high"], id: \.self) { level in
+                        Button(level.capitalized) {
+                            model.selectModel(selected, effort: level)
+                        }
+                    }
+                    Button("Default") { model.selectModel(selected) }
+                }
+            }
+            Divider()
+            Button("Use Default Model") { model.clearModelOverride() }
+        } label: {
+            Label(model.currentModelLabel, systemImage: "cpu")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+}
+
+private struct ContextUsageReadout: View {
+    let usage: ContextUsage
+
+    private var color: Color {
+        switch usage.level {
+        case "red": return .red
+        case "amber": return .orange
+        default: return .green
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 7, height: 7)
+            Text(usage.readout)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .help("Context window usage")
     }
 }
 

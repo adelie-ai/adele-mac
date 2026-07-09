@@ -39,7 +39,13 @@ final class AppModel {
     var chatStatus: String?
     var statusText = ""
     var sendEnabled = true
-    var contextReadout: String?
+    var contextUsage: ContextUsage?
+
+    // Models
+    var models: [ModelListing] = []
+    var modelSelection: ModelSelection?
+    var defaultModel: SelectedModel?
+    var modelPickerVisible = false
 
     // Composer
     var draft = ""
@@ -97,6 +103,64 @@ final class AppModel {
         core.sendPrompt(text)
     }
 
+    func selectModel(_ listing: ModelListing, effort: String = "") {
+        core.selectModel(
+            connectionID: listing.connectionId,
+            modelID: listing.model.id,
+            effort: effort
+        )
+    }
+
+    /// Clear the per-conversation override (inherit the interactive default).
+    func clearModelOverride() {
+        core.selectModel(connectionID: "", modelID: "", effort: "")
+    }
+
+    /// The label shown on the model-picker button: the selected model's display
+    /// name (falling back to the resolved default, then a placeholder).
+    var currentModelLabel: String {
+        if let selection = modelSelection,
+           let listing = models.first(where: {
+               $0.connectionId == selection.connectionId && $0.model.id == selection.modelId
+           }) {
+            return listing.model.displayName
+        }
+        if let def = defaultModel,
+           let listing = models.first(where: {
+               $0.connectionId == def.connectionId && $0.model.id == def.modelId
+           }) {
+            return listing.model.displayName
+        }
+        return "Model"
+    }
+
+    func isSelected(_ listing: ModelListing) -> Bool {
+        guard let selection = modelSelection else { return false }
+        return selection.connectionId == listing.connectionId
+            && selection.modelId == listing.model.id
+    }
+
+    var selectedListing: ModelListing? {
+        guard let selection = modelSelection else { return nil }
+        return models.first {
+            $0.connectionId == selection.connectionId && $0.model.id == selection.modelId
+        }
+    }
+
+    /// Models grouped by connection, preserving first-seen order.
+    var modelsByConnection: [(label: String, listings: [ModelListing])] {
+        var order: [String] = []
+        var groups: [String: (label: String, listings: [ModelListing])] = [:]
+        for listing in models {
+            if groups[listing.connectionId] == nil {
+                order.append(listing.connectionId)
+                groups[listing.connectionId] = (listing.connectionLabel, [])
+            }
+            groups[listing.connectionId]?.listings.append(listing)
+        }
+        return order.compactMap { groups[$0] }
+    }
+
     // MARK: - Event folding
 
     private func apply(_ event: ViewEvent) {
@@ -143,7 +207,19 @@ final class AppModel {
             chatStatus = nil
 
         case .contextUsage(let usage):
-            contextReadout = usage?.readout
+            contextUsage = usage
+
+        case .models(let items):
+            models = items
+
+        case .modelSelection(let selection):
+            modelSelection = selection
+
+        case .defaultModel(let model):
+            defaultModel = model
+
+        case .modelPickerVisible(let value):
+            modelPickerVisible = value
 
         case .addUserMessage(let content):
             appendUser(content)
