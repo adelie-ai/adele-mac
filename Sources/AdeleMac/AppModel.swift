@@ -66,10 +66,85 @@ final class AppModel {
     // Composer
     var draft = ""
 
+    // Connection profiles
+    var profiles: [Profile] = []
+    var currentProfileID: String?
+    private var store = ProfileStore()
+
     init() {
         core.onEvent = { [weak self] event in
             self?.apply(event)
         }
+        store = ProfileStore.load()
+        profiles = store.profiles
+    }
+
+    // MARK: - Profiles
+
+    /// On launch: reconnect to the last-used profile if its password is saved.
+    func autoReconnect() {
+        guard currentProfileID == nil, !connected, !connecting,
+              let lastID = store.lastProfileID,
+              let profile = profiles.first(where: { $0.id == lastID }),
+              let saved = Keychain.password(for: profile.id)
+        else { return }
+        use(profile, password: saved)
+        connect()
+    }
+
+    /// Load a profile into the form (password from the Keychain).
+    func use(_ profile: Profile, password saved: String? = nil) {
+        serverAddress = profile.wsURL
+        username = profile.username
+        password = saved ?? Keychain.password(for: profile.id) ?? ""
+        currentProfileID = profile.id
+    }
+
+    func connect(using profile: Profile) {
+        use(profile)
+        connect()
+    }
+
+    /// Reconnect to a different profile without restarting (clears view state; the
+    /// reducer re-emits conversations for the new connection).
+    func switchProfile(_ profile: Profile) {
+        guard profile.id != currentProfileID else { return }
+        conversations = []
+        messages = []
+        selectedConversationID = nil
+        use(profile)
+        connect()
+    }
+
+    var currentProfile: Profile? { profiles.first { $0.id == currentProfileID } }
+
+    func deleteProfile(_ profile: Profile) {
+        Keychain.deletePassword(for: profile.id)
+        profiles.removeAll { $0.id == profile.id }
+        if store.lastProfileID == profile.id { store.lastProfileID = nil }
+        if currentProfileID == profile.id { currentProfileID = nil }
+        persistProfiles()
+    }
+
+    @discardableResult
+    private func upsertProfile() -> Profile {
+        if let idx = profiles.firstIndex(where: {
+            $0.wsURL == serverAddress && $0.username == username
+        }) {
+            currentProfileID = profiles[idx].id
+            return profiles[idx]
+        }
+        let name = URL(string: serverAddress)?.host ?? serverAddress
+        let profile = Profile(name: name, wsURL: serverAddress, username: username)
+        profiles.append(profile)
+        currentProfileID = profile.id
+        return profile
+    }
+
+    private func persistProfiles() {
+        store.profiles = profiles
+        store.lastProfileID = currentProfileID
+        store.save()
     }
 
     // MARK: - Intents
@@ -78,6 +153,10 @@ final class AppModel {
         guard !serverAddress.isEmpty else { return }
         connecting = true
         connectionError = nil
+        // Remember this target as a profile and stash its password in the Keychain.
+        let profile = upsertProfile()
+        Keychain.setPassword(password, for: profile.id)
+        persistProfiles()
         let (url, user, pass) = (serverAddress, username, password)
         Task {
             do {
@@ -204,6 +283,7 @@ final class AppModel {
             connecting = false
             connectionError = nil
             statusText = "Connected: \(label)"
+            persistProfiles()  // record this as the last-used profile
 
         case .connectError(let message):
             connected = false
