@@ -48,6 +48,12 @@ core.onEvent = { event in
         log("• status: \(text)")
     case .conversations(let items):
         log("• conversations: \(items.count)")
+    case .models(let items):
+        log("• models: \(items.count)" + (items.first.map { " (e.g. \($0.connectionLabel)/\($0.model.displayName))" } ?? ""))
+    case .defaultModel(let m):
+        log("• default model: \(m.map { "\($0.connectionId)/\($0.modelId)" } ?? "none")")
+    case .modelSelection(let s):
+        log("• model selection: \(s.map { "\($0.connectionId)/\($0.modelId) effort=\($0.effort ?? "-")" } ?? "none")")
     case .loadConversation(let detail):
         log("• conversation open: \(detail.id) (\(detail.messages.count) msgs)")
         // Only send into the empty conversation opened after we connected — the

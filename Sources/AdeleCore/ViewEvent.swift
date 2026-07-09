@@ -57,6 +57,80 @@ public struct ContextUsage: Decodable, Hashable, Sendable {
     }
 }
 
+/// A model's capabilities (only the fields the UI uses; extras are ignored).
+public struct ModelCapabilities: Decodable, Hashable, Sendable {
+    public let reasoning: Bool
+
+    enum CodingKeys: String, CodingKey { case reasoning }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reasoning = (try? c.decode(Bool.self, forKey: .reasoning)) ?? false
+    }
+    public init(reasoning: Bool) { self.reasoning = reasoning }
+}
+
+/// One model offered by a connection.
+public struct ModelInfo: Decodable, Hashable, Sendable {
+    public let id: String
+    public let displayName: String
+    public let contextLimit: UInt64?
+    public let capabilities: ModelCapabilities
+
+    enum CodingKeys: String, CodingKey {
+        case id, capabilities
+        case displayName = "display_name"
+        case contextLimit = "context_limit"
+    }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        contextLimit = try c.decodeIfPresent(UInt64.self, forKey: .contextLimit)
+        capabilities = (try? c.decode(ModelCapabilities.self, forKey: .capabilities))
+            ?? ModelCapabilities(reasoning: false)
+    }
+}
+
+/// A model available for selection, grouped under its connection.
+public struct ModelListing: Decodable, Identifiable, Hashable, Sendable {
+    public let connectionId: String
+    public let connectionLabel: String
+    public let model: ModelInfo
+
+    public var id: String { "\(connectionId)/\(model.id)" }
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case connectionId = "connection_id"
+        case connectionLabel = "connection_label"
+    }
+}
+
+/// The per-conversation model selection (with optional effort hint).
+public struct ModelSelection: Decodable, Hashable, Sendable {
+    public let connectionId: String
+    public let modelId: String
+    /// "low" | "medium" | "high" | nil.
+    public let effort: String?
+
+    enum CodingKeys: String, CodingKey {
+        case effort
+        case connectionId = "connection_id"
+        case modelId = "model_id"
+    }
+}
+
+/// The resolved interactive-purpose default model (picker fallback).
+public struct SelectedModel: Decodable, Hashable, Sendable {
+    public let connectionId: String
+    public let modelId: String
+
+    enum CodingKeys: String, CodingKey {
+        case connectionId = "connection_id"
+        case modelId = "model_id"
+    }
+}
+
 /// One pushed view-update from the core.
 public enum ViewEvent: Decodable, Sendable {
     case connected(label: String)
@@ -73,13 +147,18 @@ public enum ViewEvent: Decodable, Sendable {
     case addUserMessage(content: String)
     case chunk(text: String)
     case complete(text: String)
+    case models([ModelListing])
+    case modelSelection(ModelSelection?)
+    case defaultModel(SelectedModel?)
+    case modelPickerVisible(Bool)
     case toast(text: String)
     case inlineNote(text: String)
-    /// Any event not yet typed (models, tasks, scratchpad, voice, …).
+    /// Any event not yet typed (tasks, scratchpad, voice, …).
     case unknown(type: String)
 
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
+        case selection, model
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,6 +193,14 @@ public enum ViewEvent: Decodable, Sendable {
             self = .chunk(text: try c.decode(String.self, forKey: .text))
         case "complete":
             self = .complete(text: try c.decode(String.self, forKey: .text))
+        case "models":
+            self = .models(try c.decode([ModelListing].self, forKey: .items))
+        case "model_selection":
+            self = .modelSelection(try c.decodeIfPresent(ModelSelection.self, forKey: .selection))
+        case "default_model":
+            self = .defaultModel(try c.decodeIfPresent(SelectedModel.self, forKey: .model))
+        case "model_picker_visible":
+            self = .modelPickerVisible(try c.decode(Bool.self, forKey: .value))
         case "toast":
             self = .toast(text: try c.decode(String.self, forKey: .text))
         case "inline_note":
