@@ -1,0 +1,4 @@
+module CAdeleCore {
+    header "include/adele_client_core.h"
+    export *
+}
