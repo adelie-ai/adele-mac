@@ -198,17 +198,22 @@ private struct MessageBubble: View {
     var body: some View {
         HStack {
             if message.isUser { Spacer(minLength: 40) }
-            VStack(alignment: message.isUser ? .trailing : .leading, spacing: 4) {
-                Text(message.content.isEmpty && message.streaming ? " " : message.content)
-                    .textSelection(.enabled)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(
-                        message.isUser ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .foregroundStyle(message.isUser ? .white : .primary)
+            Group {
+                if message.isUser {
+                    Text(message.content).textSelection(.enabled)
+                } else if message.content.isEmpty && message.streaming {
+                    Text("…").foregroundStyle(.secondary)
+                } else {
+                    MarkdownView(text: message.content)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                message.isUser ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .foregroundStyle(message.isUser ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
             if !message.isUser { Spacer(minLength: 40) }
         }
     }
