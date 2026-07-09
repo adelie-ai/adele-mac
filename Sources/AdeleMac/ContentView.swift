@@ -90,6 +90,9 @@ private struct ChatSplitView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                TasksButton()
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.newConversation()
                 } label: {
