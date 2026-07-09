@@ -231,6 +231,11 @@ private struct ChatPane: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                if model.selectedConversationID != nil {
+                    VoiceOutputMenu()
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.showScratchpad.toggle()
                 } label: {
@@ -239,6 +244,33 @@ private struct ChatPane: View {
                 .help("Show scratchpad")
             }
         }
+    }
+}
+
+private struct VoiceOutputMenu: View {
+    @Environment(AppModel.self) private var model
+
+    private var icon: String {
+        model.adeleOutputLevel == "disabled" ? "speaker.slash" : "speaker.wave.2"
+    }
+
+    var body: some View {
+        Menu {
+            Picker("Adele speaks", selection: Binding(
+                get: { model.adeleOutputLevel },
+                set: { model.setAdeleOutput($0) }
+            )) {
+                Text("Off").tag("disabled")
+                Text("On Demand").tag("on_demand")
+                Text("Always").tag("always")
+            }
+            .pickerStyle(.inline)
+            Divider()
+            Button("Stop Speaking") { model.stopSpeaking() }
+        } label: {
+            Label("Voice", systemImage: icon)
+        }
+        .help("Spoken replies")
     }
 }
 

@@ -60,6 +60,10 @@ core.onEvent = { event in
         // one newConversation() just created and left as the open conversation.
         if isConnected, !promptSent, detail.messages.isEmpty {
             promptSent = true
+            if env["ADELE_SPEAK"] == "1" {
+                log("→ enabling Adele voice output (always)")
+                core.setAdeleOutput(conversationID: detail.id, level: "always")
+            }
             log("→ sending prompt: \(prompt)")
             core.sendPrompt(prompt)
         }
@@ -67,6 +71,10 @@ core.onEvent = { event in
         log("• user: \(content)")
     case .chatStatus(let text):
         log("• …\(text)")
+    case .speak(let text):
+        log("🔊 speak: \(text)")
+    case .adeleOutputDropdown(let level):
+        log("• adele output level: \(level)")
     case .chunk(let text):
         FileHandle.standardOutput.write(Data(text.utf8))
     case .complete(let text):
