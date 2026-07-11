@@ -48,6 +48,10 @@ core.onEvent = { event in
                     log("• interactive purpose: \(purposes.interactive?.model ?? "unset")")
                     let kb = try await core.listKnowledgeEntries(limit: 5)
                     log("• knowledge entries: \(kb.count)" + (kb.first.map { " (e.g. \($0.content.prefix(40)))" } ?? ""))
+                    let mcp = try await core.listMcpServers()
+                    log("• mcp servers: \(mcp.count)" + (mcp.first.map { " (e.g. \($0.name) [\($0.status)])" } ?? ""))
+                    let personality = try await core.getPersonality()
+                    log("• personality.professionalism: \(personality.professionalism ?? "unset"), humor: \(personality.humor ?? "unset")")
                     if let setModel = env["ADELE_SET_INTERACTIVE"], let conn = env["ADELE_SET_CONN"] {
                         try await core.setPurpose("interactive", connection: conn, model: setModel)
                         let after = try await core.getPurposes()

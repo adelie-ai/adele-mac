@@ -31,6 +31,9 @@ echo ">> cargo build -p client-ui-ffi ($CONFIG)"
 
 HEADER_SRC="$CORE_DIR/ffi/include/adele_client_core.h"
 HEADER_DST="$MAC_DIR/Sources/CAdeleCore/include/adele_client_core.h"
+# The include/ dir is gitignored (holds only the generated header), so a fresh
+# checkout/worktree won't have it — create it before staging.
+mkdir -p "$(dirname "$HEADER_DST")"
 cp "$HEADER_SRC" "$HEADER_DST"
 echo ">> staged header -> $HEADER_DST"
 

@@ -1,9 +1,9 @@
 import AdeleCore
 import SwiftUI
 
-/// The Settings (⌘,) window: model purposes + configured connections. These use
-/// the generic management command bridge (`send_command`) over the live
-/// connection, so they require an active connection.
+/// The Settings (⌘,) window: model purposes, LLM connections, MCP servers, and
+/// personality. These use the generic management command bridge (`send_command`)
+/// over the live connection, so they require an active connection.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
 
@@ -11,10 +11,14 @@ struct SettingsView: View {
         TabView {
             PurposesSettings()
                 .tabItem { Label("Purposes", systemImage: "target") }
-            ConnectionsSettings()
+            ConnectionsEditorView()
                 .tabItem { Label("Connections", systemImage: "server.rack") }
+            McpSettingsView()
+                .tabItem { Label("MCP", systemImage: "puzzlepiece.extension") }
+            PersonalitySettingsView()
+                .tabItem { Label("Personality", systemImage: "theatermasks") }
         }
-        .frame(width: 540, height: 400)
+        .frame(width: 560, height: 460)
         .task { model.loadSettings() }
     }
 }
@@ -83,40 +87,6 @@ private struct PurposeRow: View {
     }
 }
 
-private struct ConnectionsSettings: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        Form {
-            if !model.connected {
-                Text("Connect to view configured connections.")
-                    .foregroundStyle(.secondary)
-            } else if model.connections.isEmpty {
-                Text(model.settingsLoading ? "Loading…" : "No connections configured.")
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(model.connections) { connection in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(connection.availability.isOk ? Color.green : Color.red)
-                            .frame(width: 8, height: 8)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(connection.displayLabel)
-                            Text(connection.availability.isOk
-                                ? connection.connectorType
-                                : "\(connection.connectorType) — \(connection.availability.reason ?? "unavailable")")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: connection.hasCredentials ? "key.fill" : "key.slash")
-                            .foregroundStyle(connection.hasCredentials ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
-                            .help(connection.hasCredentials ? "Credentials present" : "No credentials")
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
-        }
-        .formStyle(.grouped)
-    }
-}
+// The read-only connections tab was superseded by the editable
+// `ConnectionsEditorView` (create/update/delete). `AppModel.connections` /
+// `loadSettings()` still back the Purposes tab's model list.
