@@ -46,6 +46,8 @@ core.onEvent = { event in
                     log("• connections: \(conns.map { "\($0.id)[\($0.availability.isOk ? "ok" : "down")]" }.joined(separator: ", "))")
                     let purposes = try await core.getPurposes()
                     log("• interactive purpose: \(purposes.interactive?.model ?? "unset")")
+                    let kb = try await core.listKnowledgeEntries(limit: 5)
+                    log("• knowledge entries: \(kb.count)" + (kb.first.map { " (e.g. \($0.content.prefix(40)))" } ?? ""))
                     if let setModel = env["ADELE_SET_INTERACTIVE"], let conn = env["ADELE_SET_CONN"] {
                         try await core.setPurpose("interactive", connection: conn, model: setModel)
                         let after = try await core.getPurposes()
