@@ -43,5 +43,10 @@ struct AdeleMacApp: App {
                 .disabled(!model.connected)
             }
         }
+
+        Settings {
+            SettingsView()
+                .environment(model)
+        }
     }
 }
