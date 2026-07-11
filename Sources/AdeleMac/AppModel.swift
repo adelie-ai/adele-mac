@@ -23,7 +23,9 @@ struct DisplayMessage: Identifiable, Hashable {
 @MainActor
 @Observable
 final class AppModel {
-    private let core = AdeleCore()
+    /// The single shared core. Exposed (not private) so per-feature settings
+    /// views can issue management commands directly through it.
+    let core = AdeleCore()
 
     // Connection
     var connected = false
