@@ -177,6 +177,14 @@ private struct ChatSplitView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.showKnowledge = true
+                } label: {
+                    Label("Knowledge Base", systemImage: "books.vertical")
+                }
+                .help("Knowledge base")
+            }
+            ToolbarItem(placement: .primaryAction) {
                 TasksButton()
             }
             ToolbarItem(placement: .primaryAction) {
@@ -186,6 +194,9 @@ private struct ChatSplitView: View {
                     Label("New Conversation", systemImage: "square.and.pencil")
                 }
             }
+        }
+        .sheet(isPresented: $model.showKnowledge) {
+            KnowledgeView()
         }
     }
 }

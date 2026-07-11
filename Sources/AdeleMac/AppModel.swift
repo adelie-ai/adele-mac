@@ -82,6 +82,12 @@ final class AppModel {
     var settingsError: String?
     var settingsLoading = false
 
+    // Knowledge base
+    var knowledgeEntries: [KnowledgeEntry] = []
+    var knowledgeSearch = ""
+    var showKnowledge = false
+    var knowledgeLoading = false
+
     init() {
         core.onEvent = { [weak self] event in
             self?.apply(event)
@@ -295,6 +301,51 @@ final class AppModel {
             do {
                 try await core.setPurpose(purpose, connection: connectionID, model: modelID)
                 purposes = try await core.getPurposes()
+            } catch {
+                settingsError = "\(error)"
+            }
+        }
+    }
+
+    // MARK: - Knowledge base
+
+    func loadKnowledge() {
+        guard connected else { return }
+        knowledgeLoading = true
+        settingsError = nil
+        let query = knowledgeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task {
+            do {
+                knowledgeEntries = query.isEmpty
+                    ? try await core.listKnowledgeEntries()
+                    : try await core.searchKnowledgeEntries(query)
+            } catch {
+                settingsError = "\(error)"
+            }
+            knowledgeLoading = false
+        }
+    }
+
+    func saveKnowledge(id: String?, content: String, tags: [String]) {
+        Task {
+            do {
+                if let id {
+                    try await core.updateKnowledgeEntry(id: id, content: content, tags: tags)
+                } else {
+                    try await core.createKnowledgeEntry(content: content, tags: tags)
+                }
+                loadKnowledge()
+            } catch {
+                settingsError = "\(error)"
+            }
+        }
+    }
+
+    func deleteKnowledge(id: String) {
+        Task {
+            do {
+                try await core.deleteKnowledgeEntry(id: id)
+                loadKnowledge()
             } catch {
                 settingsError = "\(error)"
             }
