@@ -56,12 +56,15 @@ model listing, voice) via `AdeleSmoke`.
   in-app profile switching.
 - **Phase 4 (output)** — Adele speaks replies via `AVSpeechSynthesizer`, with a
   per-conversation output-level control.
+- **Phase 5 (partial)** — Settings (⌘,): model **purposes** (change the
+  interactive/default model) and read-only **connections** view; a **knowledge
+  base** browser/editor (list/search/add/edit/delete). All over a new generic
+  FFI management bridge (`adele_core_send_command`).
 - **UX** — Return-to-send (Shift+Return newline), delete confirmation, Cmd-N /
   Cmd-Opt-S shortcuts.
 
 **Remaining toward GTK parity**
-- Settings / management UI (connections, API keys, knowledge base, purposes,
-  personality) — rides a separate management API not yet exposed via the FFI.
+- Personality editor, connection create/edit (env-var-based), MCP-server config.
 - OAuth login flow; multi-window; voice **input** (STT capture).
 - Distribution: universal static lib, signed/notarized `.app`, Homebrew cask.
 
