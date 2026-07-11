@@ -31,6 +31,10 @@ public final class AdeleCore: @unchecked Sendable {
     /// Delivered on the main actor, one per pushed view-event.
     public var onEvent: (@MainActor (ViewEvent) -> Void)?
 
+    /// In-flight management commands, keyed by request id. Accessed only on the
+    /// main actor (both `sendCommand` and the reply in `dispatch` run there).
+    private var pendingCommands: [String: CheckedContinuation<Data, Error>] = [:]
+
     public init() {
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         handle = adele_core_new({ userData, json in
@@ -50,16 +54,40 @@ public final class AdeleCore: @unchecked Sendable {
     }
 
     private func dispatch(_ json: String) {
-        guard
-            let data = json.data(using: .utf8),
-            let event = try? JSONDecoder().decode(ViewEvent.self, from: data)
-        else {
-            return  // malformed / non-object — ignore rather than crash
-        }
+        guard let data = json.data(using: .utf8) else { return }
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
-                self?.onEvent?(event)
+                guard let self else { return }
+                // Management command replies are correlated to their awaiting
+                // caller, not folded into the UI event stream.
+                if let head = try? JSONDecoder().decode(CommandResultHead.self, from: data),
+                   head.type == "command_result" {
+                    if let continuation = self.pendingCommands.removeValue(forKey: head.requestID) {
+                        if head.ok {
+                            continuation.resume(returning: data)
+                        } else {
+                            continuation.resume(throwing: CommandError.failed(head.error ?? "command failed"))
+                        }
+                    }
+                    return
+                }
+                if let event = try? JSONDecoder().decode(ViewEvent.self, from: data) {
+                    self.onEvent?(event)
+                }
             }
+        }
+    }
+
+    /// Send a management `api::Command` (JSON) and await its `CommandResult`. The
+    /// returned `Data` is the full `command_result` event; decode its `result`
+    /// field with `CommandResultEnvelope<T>`.
+    @MainActor
+    public func sendCommand(_ commandJSON: String) async throws -> Data {
+        guard handle != nil else { throw CommandError.failed("core not initialized") }
+        let requestID = UUID().uuidString
+        return try await withCheckedThrowingContinuation { continuation in
+            pendingCommands[requestID] = continuation
+            adele_core_send_command(handle, requestID, commandJSON)
         }
     }
 

@@ -39,6 +39,25 @@ core.onEvent = { event in
     case .connected(let label):
         log("✅ connected: \(label)")
         isConnected = true
+        if env["ADELE_MGMT"] == "1" {
+            Task { @MainActor in
+                do {
+                    let conns = try await core.listConnections()
+                    log("• connections: \(conns.map { "\($0.id)[\($0.availability.isOk ? "ok" : "down")]" }.joined(separator: ", "))")
+                    let purposes = try await core.getPurposes()
+                    log("• interactive purpose: \(purposes.interactive?.model ?? "unset")")
+                    if let setModel = env["ADELE_SET_INTERACTIVE"], let conn = env["ADELE_SET_CONN"] {
+                        try await core.setPurpose("interactive", connection: conn, model: setModel)
+                        let after = try await core.getPurposes()
+                        log("✅ set interactive → \(after.interactive?.model ?? "?")")
+                    }
+                    finish(0, "✅ management bridge works")
+                } catch {
+                    finish(1, "❌ management failed: \(error)")
+                }
+            }
+            return
+        }
         // Start a fresh conversation so streamed chunks land in the open
         // conversation (an auto-opened existing one may arrive before `connected`).
         core.newConversation()

@@ -76,6 +76,12 @@ final class AppModel {
     var currentProfileID: String?
     private var store = ProfileStore()
 
+    // Settings / management
+    var connections: [ConnectionView] = []
+    var purposes = PurposesView()
+    var settingsError: String?
+    var settingsLoading = false
+
     init() {
         core.onEvent = { [weak self] event in
             self?.apply(event)
@@ -251,6 +257,48 @@ final class AppModel {
         guard let selection = modelSelection else { return false }
         return selection.connectionId == listing.connectionId
             && selection.modelId == listing.model.id
+    }
+
+    // MARK: - Settings / management
+
+    func loadSettings() {
+        guard connected else { return }
+        settingsLoading = true
+        settingsError = nil
+        Task {
+            do {
+                async let conns = core.listConnections()
+                async let purps = core.getPurposes()
+                connections = try await conns
+                purposes = try await purps
+            } catch {
+                settingsError = "\(error)"
+            }
+            settingsLoading = false
+        }
+    }
+
+    func purpose(for kind: String) -> PurposeConfigView? {
+        switch kind {
+        case "interactive": return purposes.interactive
+        case "dreaming": return purposes.dreaming
+        case "consolidation": return purposes.consolidation
+        case "embedding": return purposes.embedding
+        case "titling": return purposes.titling
+        default: return nil
+        }
+    }
+
+    /// Assign a purpose (e.g. "interactive") to a model. Reloads purposes after.
+    func setPurpose(_ purpose: String, connectionID: String, modelID: String) {
+        Task {
+            do {
+                try await core.setPurpose(purpose, connection: connectionID, model: modelID)
+                purposes = try await core.getPurposes()
+            } catch {
+                settingsError = "\(error)"
+            }
+        }
     }
 
     // MARK: - Tasks
