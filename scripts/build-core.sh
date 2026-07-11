@@ -13,7 +13,8 @@ CONFIG="${1:-debug}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MAC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CORE_DIR="$(cd "$MAC_DIR/.." && pwd)/client-ui-common"
+# Default to the sibling checkout; override with ADELE_CORE_DIR for worktrees.
+CORE_DIR="${ADELE_CORE_DIR:-$(cd "$MAC_DIR/.." && pwd)/client-ui-common}"
 
 if [[ ! -f "$CORE_DIR/ffi/Cargo.toml" ]]; then
     echo "error: client-ui-common/ffi not found at $CORE_DIR/ffi" >&2

@@ -2,16 +2,17 @@
 import PackageDescription
 import Foundation
 
-// Absolute path to the Rust core's build output, derived from this manifest's
-// location so it is machine-independent: <...>/adelie-ai/client-ui-common is a
-// sibling of <...>/adelie-ai/adele-mac. Phase 1 links the debug dylib directly
-// and bakes a dev RPATH pointing at it; a later phase produces a universal
-// static lib and a proper .app bundle instead of relying on this path.
+// Absolute path to the Rust core's build output. Defaults to the sibling
+// checkout (<...>/adelie-ai/client-ui-common is a sibling of adele-mac), but is
+// overridable via ADELE_CORE_LIB_DIR so the package still builds from a git
+// worktree (where the sibling layout doesn't hold). Phase 1 links the debug
+// dylib directly and bakes a dev RPATH; distribution packaging comes later.
 let packageDir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-let coreLibDir = packageDir
-    .deletingLastPathComponent()                       // adelie-ai/
-    .appendingPathComponent("client-ui-common/target/debug")
-    .standardizedFileURL.path
+let coreLibDir = ProcessInfo.processInfo.environment["ADELE_CORE_LIB_DIR"]
+    ?? packageDir
+        .deletingLastPathComponent()                   // adelie-ai/
+        .appendingPathComponent("client-ui-common/target/debug")
+        .standardizedFileURL.path
 
 // Link the prebuilt Rust cdylib and bake a dev RPATH so the loader resolves
 // @rpath/libadele_client_core.dylib at runtime. Shared by every executable.
@@ -50,6 +51,15 @@ let package = Package(
         // transport + auth against a real daemon without the GUI.
         .executableTarget(
             name: "AdeleSmoke",
+            dependencies: ["AdeleCore"],
+            linkerSettings: [coreLinkFlags]
+        ),
+
+        // Unit tests for the pure logic in AdeleCore: view-event decoding,
+        // command wire-format builders, result decoders, login-URL derivation.
+        // Links the core dylib (AdeleCore references the C symbols).
+        .testTarget(
+            name: "AdeleCoreTests",
             dependencies: ["AdeleCore"],
             linkerSettings: [coreLinkFlags]
         ),

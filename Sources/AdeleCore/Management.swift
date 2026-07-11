@@ -95,15 +95,14 @@ extension AdeleCore {
 
     @MainActor
     public func listConnections() async throws -> [ConnectionView] {
-        // Unit command variants serialize as a bare JSON string.
-        let data = try await sendCommand("\"list_connections\"")
+        let data = try await sendCommand(AdeleCommand.listConnections)
         let envelope = try JSONDecoder().decode(CommandResultEnvelope<ConnectionsPayload>.self, from: data)
         return envelope.result?.connections ?? []
     }
 
     @MainActor
     public func getPurposes() async throws -> PurposesView {
-        let data = try await sendCommand("\"get_purposes\"")
+        let data = try await sendCommand(AdeleCommand.getPurposes)
         let envelope = try JSONDecoder().decode(CommandResultEnvelope<PurposesPayload>.self, from: data)
         return envelope.result?.purposes ?? PurposesView()
     }
@@ -117,24 +116,9 @@ extension AdeleCore {
         model: String,
         effort: String? = nil
     ) async throws {
-        struct Config: Encodable {
-            let connection: String
-            let model: String
-            let effort: String?
-        }
-        struct Payload: Encodable {
-            let purpose: String
-            let config: Config
-        }
-        struct Cmd: Encodable {
-            let set_purpose: Payload  // externally-tagged Command::SetPurpose
-        }
-        let command = Cmd(set_purpose: Payload(
-            purpose: purpose,
-            config: Config(connection: connection, model: model, effort: effort)
-        ))
-        let json = String(decoding: try JSONEncoder().encode(command), as: UTF8.self)
-        _ = try await sendCommand(json)  // CommandResult::Ack, or throws
+        _ = try await sendCommand(AdeleCommand.setPurpose(
+            purpose, connection: connection, model: model, effort: effort
+        ))  // CommandResult::Ack, or throws
     }
 }
 
@@ -144,28 +128,16 @@ extension AdeleCore {
     private struct KnowledgeEntriesPayload: Decodable { let knowledge_entries: [KnowledgeEntry] }
     private struct KnowledgeWrittenPayload: Decodable { let knowledge_entry_written: KnowledgeEntry }
 
-    private func encode<T: Encodable>(_ value: T) throws -> String {
-        String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
-    }
-
     @MainActor
     public func listKnowledgeEntries(limit: Int = 100, offset: Int = 0) async throws -> [KnowledgeEntry] {
-        struct Cmd: Encodable {
-            struct P: Encodable { let limit: Int; let offset: Int }
-            let list_knowledge_entries: P
-        }
-        let data = try await sendCommand(try encode(Cmd(list_knowledge_entries: .init(limit: limit, offset: offset))))
+        let data = try await sendCommand(AdeleCommand.listKnowledge(limit: limit, offset: offset))
         return try JSONDecoder().decode(CommandResultEnvelope<KnowledgeEntriesPayload>.self, from: data)
             .result?.knowledge_entries ?? []
     }
 
     @MainActor
     public func searchKnowledgeEntries(_ query: String, limit: Int = 100) async throws -> [KnowledgeEntry] {
-        struct Cmd: Encodable {
-            struct P: Encodable { let query: String; let limit: Int }
-            let search_knowledge_entries: P
-        }
-        let data = try await sendCommand(try encode(Cmd(search_knowledge_entries: .init(query: query, limit: limit))))
+        let data = try await sendCommand(AdeleCommand.searchKnowledge(query: query, limit: limit))
         return try JSONDecoder().decode(CommandResultEnvelope<KnowledgeEntriesPayload>.self, from: data)
             .result?.knowledge_entries ?? []
     }
@@ -173,11 +145,7 @@ extension AdeleCore {
     @MainActor
     @discardableResult
     public func createKnowledgeEntry(content: String, tags: [String]) async throws -> KnowledgeEntry {
-        struct Cmd: Encodable {
-            struct P: Encodable { let content: String; let tags: [String] }
-            let create_knowledge_entry: P
-        }
-        let data = try await sendCommand(try encode(Cmd(create_knowledge_entry: .init(content: content, tags: tags))))
+        let data = try await sendCommand(AdeleCommand.createKnowledge(content: content, tags: tags))
         guard let entry = try JSONDecoder().decode(CommandResultEnvelope<KnowledgeWrittenPayload>.self, from: data)
             .result?.knowledge_entry_written else { throw CommandError.failed("no entry returned") }
         return entry
@@ -186,11 +154,7 @@ extension AdeleCore {
     @MainActor
     @discardableResult
     public func updateKnowledgeEntry(id: String, content: String, tags: [String]) async throws -> KnowledgeEntry {
-        struct Cmd: Encodable {
-            struct P: Encodable { let id: String; let content: String; let tags: [String] }
-            let update_knowledge_entry: P
-        }
-        let data = try await sendCommand(try encode(Cmd(update_knowledge_entry: .init(id: id, content: content, tags: tags))))
+        let data = try await sendCommand(AdeleCommand.updateKnowledge(id: id, content: content, tags: tags))
         guard let entry = try JSONDecoder().decode(CommandResultEnvelope<KnowledgeWrittenPayload>.self, from: data)
             .result?.knowledge_entry_written else { throw CommandError.failed("no entry returned") }
         return entry
@@ -198,10 +162,6 @@ extension AdeleCore {
 
     @MainActor
     public func deleteKnowledgeEntry(id: String) async throws {
-        struct Cmd: Encodable {
-            struct P: Encodable { let id: String }
-            let delete_knowledge_entry: P
-        }
-        _ = try await sendCommand(try encode(Cmd(delete_knowledge_entry: .init(id: id))))
+        _ = try await sendCommand(AdeleCommand.deleteKnowledge(id: id))
     }
 }
