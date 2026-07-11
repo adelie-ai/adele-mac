@@ -56,15 +56,18 @@ model listing, voice) via `AdeleSmoke`.
   in-app profile switching.
 - **Phase 4 (output)** — Adele speaks replies via `AVSpeechSynthesizer`, with a
   per-conversation output-level control.
-- **Phase 5 (partial)** — Settings (⌘,): model **purposes** (change the
-  interactive/default model) and read-only **connections** view; a **knowledge
-  base** browser/editor (list/search/add/edit/delete). All over a new generic
-  FFI management bridge (`adele_core_send_command`).
+- **Phase 5** — Settings (⌘,): model **purposes**, **connections editor**
+  (create/update/delete anthropic/openai/bedrock/ollama), **MCP servers**
+  (list/add/remove/enable), **personality** (7 dials); plus a **knowledge base**
+  browser/editor. All over a generic FFI management bridge
+  (`adele_core_send_command`). Covered by a **Swift Testing** suite (56 tests) —
+  run `./scripts/test.sh`.
 - **UX** — Return-to-send (Shift+Return newline), delete confirmation, Cmd-N /
   Cmd-Opt-S shortcuts.
 
 **Remaining toward GTK parity**
-- Personality editor, connection create/edit (env-var-based), MCP-server config.
+- Connection edit pre-fill (decode the echoed non-secret `config`), force-delete
+  prompt, select-models filter, first-run setup wizard.
 - OAuth login flow; multi-window; voice **input** (STT capture).
 - Distribution: universal static lib, signed/notarized `.app`, Homebrew cask.
 
