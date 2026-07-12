@@ -277,6 +277,12 @@ final class AppModel {
         speaker.stop()
     }
 
+    /// Reflect the `You:` (voice-input) state for the open conversation.
+    func setVoiceIn(_ enabled: Bool) {
+        guard let id = selectedConversationID else { return }
+        core.setVoiceIn(conversationID: id, enabled: enabled)
+    }
+
     /// Speak a sample line with the current voice settings (Voice settings preview).
     func previewVoice() {
         speaker.stop()

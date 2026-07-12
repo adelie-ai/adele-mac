@@ -515,6 +515,9 @@ private struct MessageBubble: View {
 
 private struct ComposerView: View {
     @Environment(AppModel.self) private var model
+    @State private var dictation = Dictation()
+    @State private var isDictating = false
+    @State private var dictationError: String?
 
     var body: some View {
         @Bindable var model = model
@@ -531,6 +534,16 @@ private struct ComposerView: View {
                     return .handled
                 }
             Button {
+                toggleDictation()
+            } label: {
+                Image(systemName: isDictating ? "mic.fill" : "mic")
+                    .font(.system(size: 20))
+                    .foregroundStyle(isDictating ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                    .symbolEffect(.pulse, isActive: isDictating)
+            }
+            .buttonStyle(.plain)
+            .help(isDictating ? "Stop dictation" : "Dictate")
+            Button {
                 model.send()
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
@@ -540,5 +553,35 @@ private struct ComposerView: View {
             .disabled(!model.sendEnabled || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(12)
+        .alert("Dictation", isPresented: Binding(
+            get: { dictationError != nil },
+            set: { if !$0 { dictationError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(dictationError ?? "")
+        }
+    }
+
+    private func toggleDictation() {
+        if isDictating {
+            dictation.stop()
+            return
+        }
+        Task {
+            guard await dictation.requestAuthorization() else {
+                dictationError = "Microphone and Speech Recognition permission are required. Grant them in System Settings → Privacy & Security."
+                return
+            }
+            dictation.onText = { model.draft = $0 }  // stream into the composer
+            dictation.onEnd = { error in
+                isDictating = false
+                model.setVoiceIn(false)
+                if let error { dictationError = error }
+            }
+            isDictating = true
+            model.setVoiceIn(true)
+            dictation.start()
+        }
     }
 }

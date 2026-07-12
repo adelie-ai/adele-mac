@@ -54,22 +54,30 @@ model listing, voice) via `AdeleSmoke`.
   scratchpad inspector, toasts + inline notes.
 - **Phase 3 (partial)** — connection profiles + macOS Keychain + auto-reconnect +
   in-app profile switching.
-- **Phase 4 (output)** — Adele speaks replies via `AVSpeechSynthesizer`, with a
-  per-conversation output-level control.
-- **Phase 5** — Settings (⌘,): model **purposes**, **connections editor**
-  (create/update/delete anthropic/openai/bedrock/ollama), **MCP servers**
-  (list/add/remove/enable), **personality** (7 dials); plus a **knowledge base**
-  browser/editor. All over a generic FFI management bridge
-  (`adele_core_send_command`). Covered by a **Swift Testing** suite (56 tests) —
-  run `./scripts/test.sh`.
-- **UX** — Return-to-send (Shift+Return newline), delete confirmation, Cmd-N /
-  Cmd-Opt-S shortcuts.
+- **Voice** — output via `AVSpeechSynthesizer` (per-conversation level + a Voice
+  settings tab: voice picker, rate/pitch); **input** via `SFSpeechRecognizer`
+  dictation (mic button in the composer).
+- **Settings (⌘,)** — model **purposes**, **connections editor**
+  (create/update/delete anthropic/openai/bedrock/ollama, with **direct credential
+  entry** and edit pre-fill), **MCP servers**, **personality** (7 dials); plus a
+  **knowledge base** browser/editor. All over a generic FFI management bridge
+  (`adele_core_send_command`).
+- **Conversations** — new/select/delete, **rename**, **archive/unarchive**
+  (archived grouped in their own section), **per-conversation personality**.
+- **Chat** — native Markdown, model picker (+ effort + **select-models filter**),
+  context-usage meter, tasks panel, scratchpad, toasts, avatars.
+- **UX** — Return-to-send, delete confirmation, Cmd-N / Cmd-Opt-S shortcuts.
+
+Covered by a **Swift Testing** suite — run `./scripts/test.sh`. Build a
+self-contained (unsigned) `.app` with `./scripts/build-app.sh`.
 
 **Remaining toward GTK parity**
-- Connection edit pre-fill (decode the echoed non-secret `config`), force-delete
-  prompt, select-models filter, first-run setup wizard.
-- OAuth login flow; multi-window; voice **input** (STT capture).
-- Distribution: universal static lib, signed/notarized `.app`, Homebrew cask.
+- First-run setup wizard; multi-window (needs a per-window connection/core).
+- OAuth login flow (the password `/login` path works; OAuth needs an
+  OAuth-configured daemon to build against).
+- Distribution: **signing + notarization** (needs an Apple Developer ID) and a
+  Homebrew cask; a universal (arm64+x86_64) build. `build-app.sh` produces the
+  unsigned bundle today.
 
 ### Auth (macOS)
 

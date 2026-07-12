@@ -44,6 +44,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSMicrophoneUsageDescription</key><string>Adele uses the microphone for voice dictation.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>Adele transcribes your dictation to text with on-device speech recognition.</string>
 </dict>
 </plist>
 PLIST
