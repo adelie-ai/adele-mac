@@ -90,8 +90,8 @@ extension AdeleCore {
     private struct ConnectionsPayload: Decodable { let connections: [ConnectionView] }
     private struct PurposesPayload: Decodable { let purposes: PurposesView }
 
-    /// The five configurable purposes (matches api-model `PurposeKind`).
-    public static let purposeKinds = ["interactive", "dreaming", "consolidation", "embedding", "titling"]
+    /// The configurable purposes (matches api-model `PurposeKind`).
+    public static let purposeKinds = ["interactive", "voice", "dreaming", "consolidation", "embedding", "titling"]
 
     @MainActor
     public func listConnections() async throws -> [ConnectionView] {
