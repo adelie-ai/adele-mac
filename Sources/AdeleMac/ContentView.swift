@@ -119,6 +119,8 @@ private struct ConnectView: View {
 private struct ChatSplitView: View {
     @Environment(AppModel.self) private var model
     @State private var pendingDelete: ConversationSummary?
+    @State private var renameTarget: ConversationSummary?
+    @State private var renameText = ""
 
     var body: some View {
         @Bindable var model = model
@@ -127,20 +129,29 @@ private struct ChatSplitView: View {
                 get: { model.selectedConversationID },
                 set: { if let id = $0 { model.selectConversation(id) } }
             )) {
-                ForEach(model.conversations) { convo in
-                    ConversationRow(convo: convo)
-                        .tag(convo.id)
-                        .contextMenu {
-                            Button("Delete", role: .destructive) {
-                                pendingDelete = convo
-                            }
+                ForEach(model.activeConversations) { convo in
+                    conversationRow(convo)
+                }
+                if !model.archivedConversations.isEmpty {
+                    Section("Archived") {
+                        ForEach(model.archivedConversations) { convo in
+                            conversationRow(convo)
                         }
+                    }
                 }
             }
             .navigationTitle("Conversations")
             .navigationSplitViewColumnWidth(min: 200, ideal: 260)
         } detail: {
             ChatPane()
+        }
+        .alert("Rename Conversation", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        ), presenting: renameTarget) { convo in
+            TextField("Title", text: $renameText)
+            Button("Rename") { model.renameConversation(convo.id, title: renameText) }
+            Button("Cancel", role: .cancel) {}
         }
         .confirmationDialog(
             "Delete this conversation?",
@@ -199,6 +210,24 @@ private struct ChatSplitView: View {
             KnowledgeView()
         }
     }
+
+    @ViewBuilder
+    private func conversationRow(_ convo: ConversationSummary) -> some View {
+        ConversationRow(convo: convo)
+            .tag(convo.id)
+            .contextMenu {
+                Button("Rename…") {
+                    renameText = convo.title
+                    renameTarget = convo
+                }
+                if convo.archived {
+                    Button("Unarchive") { model.unarchiveConversation(convo.id) }
+                } else {
+                    Button("Archive") { model.archiveConversation(convo.id) }
+                }
+                Button("Delete", role: .destructive) { pendingDelete = convo }
+            }
+    }
 }
 
 private struct ConversationRow: View {
@@ -223,6 +252,7 @@ private struct ConversationRow: View {
 
 private struct ChatPane: View {
     @Environment(AppModel.self) private var model
+    @State private var showPersonality = false
 
     var body: some View {
         @Bindable var model = model
@@ -261,12 +291,27 @@ private struct ChatPane: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                if model.selectedConversationID != nil {
+                    Button {
+                        showPersonality = true
+                    } label: {
+                        Label("Personality", systemImage: "theatermasks")
+                    }
+                    .help("Personality for this conversation")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.showScratchpad.toggle()
                 } label: {
                     Label("Scratchpad", systemImage: "note.text")
                 }
                 .help("Show scratchpad")
+            }
+        }
+        .sheet(isPresented: $showPersonality) {
+            if let id = model.selectedConversationID {
+                ConversationPersonalitySheet(conversationID: id)
             }
         }
     }
@@ -301,10 +346,11 @@ private struct VoiceOutputMenu: View {
 
 private struct ModelPicker: View {
     @Environment(AppModel.self) private var model
+    @State private var showSelectModels = false
 
     var body: some View {
         Menu {
-            ForEach(model.modelsByConnection, id: \.label) { group in
+            ForEach(model.pickerModelsByConnection, id: \.label) { group in
                 Section(group.label) {
                     ForEach(group.listings) { listing in
                         Button {
@@ -332,11 +378,15 @@ private struct ModelPicker: View {
             }
             Divider()
             Button("Use Default Model") { model.clearModelOverride() }
+            Button("Select Models…") { showSelectModels = true }
         } label: {
             Label(model.currentModelLabel, systemImage: "cpu")
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .sheet(isPresented: $showSelectModels, onDismiss: { model.reloadSelectedModels() }) {
+            SelectModelsView()
+        }
     }
 }
 

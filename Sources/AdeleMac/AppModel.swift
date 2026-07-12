@@ -51,6 +51,13 @@ final class AppModel {
     var modelSelection: ModelSelection?
     var defaultModel: SelectedModel?
     var modelPickerVisible = false
+    /// User-curated subset shown in the picker (persisted). Empty = show all.
+    var selectedModels = SelectedModelsStore.load()
+
+    func reloadSelectedModels() { selectedModels = .load() }
+
+    /// The models the picker should show, after the user's select-models filter.
+    var pickerModels: [ModelListing] { selectedModels.filter(models) }
 
     // Background tasks
     var tasks: [TaskView] = []
@@ -232,6 +239,24 @@ final class AppModel {
         }
     }
 
+    // Rename / archive / unarchive (daemon refreshes the sidebar via the reducer).
+    func renameConversation(_ id: String, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task { try? await core.renameConversation(id: id, title: trimmed) }
+    }
+
+    func archiveConversation(_ id: String) {
+        Task { try? await core.archiveConversation(id: id) }
+    }
+
+    func unarchiveConversation(_ id: String) {
+        Task { try? await core.unarchiveConversation(id: id) }
+    }
+
+    var activeConversations: [ConversationSummary] { conversations.filter { !$0.archived } }
+    var archivedConversations: [ConversationSummary] { conversations.filter(\.archived) }
+
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, sendEnabled else { return }
@@ -410,9 +435,20 @@ final class AppModel {
 
     /// Models grouped by connection, preserving first-seen order.
     var modelsByConnection: [(label: String, listings: [ModelListing])] {
+        Self.groupByConnection(models)
+    }
+
+    /// The model picker's grouped list, after the select-models filter.
+    var pickerModelsByConnection: [(label: String, listings: [ModelListing])] {
+        Self.groupByConnection(pickerModels)
+    }
+
+    private static func groupByConnection(
+        _ listings: [ModelListing]
+    ) -> [(label: String, listings: [ModelListing])] {
         var order: [String] = []
         var groups: [String: (label: String, listings: [ModelListing])] = [:]
-        for listing in models {
+        for listing in listings {
             if groups[listing.connectionId] == nil {
                 order.append(listing.connectionId)
                 groups[listing.connectionId] = (listing.connectionLabel, [])
