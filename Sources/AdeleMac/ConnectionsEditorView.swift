@@ -148,6 +148,12 @@ private struct ConnectionEditorSheet: View {
     @State private var connectTimeout = ""
     @State private var streamTimeout = ""
     @State private var maxTokens = ""
+    // Raw credentials entered directly (stored in the daemon's secret store, not
+    // in daemon.toml). Blank on edit = keep the existing secret untouched.
+    @State private var apiKey = ""
+    @State private var awsAccessKey = ""
+    @State private var awsSecretKey = ""
+    @State private var awsSessionToken = ""
     @State private var saving = false
     @State private var errorText: String?
 
@@ -178,20 +184,24 @@ private struct ConnectionEditorSheet: View {
                     TextField(baseURLPrompt, text: $baseURL)
                     if connectorType == "anthropic" || connectorType == "openai" {
                         TextField("API key env var (api_key_env)", text: $apiKeyEnv)
+                        SecureField(secretPrompt, text: $apiKey)
                     }
                     if connectorType == "bedrock" {
                         TextField("AWS profile (aws_profile)", text: $awsProfile)
                         TextField("Region (e.g. us-east-1)", text: $region)
+                        SecureField("AWS Access Key ID (optional)", text: $awsAccessKey)
+                        SecureField("AWS Secret Access Key", text: $awsSecretKey)
+                        SecureField("AWS Session Token (optional)", text: $awsSessionToken)
                     }
                     if connectorType == "ollama" {
                         Toggle("Keep model warm (keep_warm)", isOn: $keepWarm)
                     }
                 } footer: {
                     if connectorType == "anthropic" || connectorType == "openai" {
-                        Text("The API key itself is provided as the named environment variable (`api_key_env`) on the daemon — this screen only sets which variable to read.")
+                        Text("Provide the key either via an environment variable on the daemon (`api_key_env`) **or** by entering it here — it's stored in the daemon's secret store, never in daemon.toml.")
                             .font(.caption)
                     } else if connectorType == "bedrock" {
-                        Text("Bedrock authenticates via ambient AWS credentials (profile / role) — no API key env var.")
+                        Text("Enter AWS keys to store them securely on the daemon (no `~/.aws` or env vars needed), or leave blank to use ambient credentials (profile / role / IRSA).")
                             .font(.caption)
                     } else {
                         Text("Ollama runs locally and needs no credentials.")
@@ -226,6 +236,31 @@ private struct ConnectionEditorSheet: View {
 
     private var baseURLPrompt: String {
         connectorType == "ollama" ? "Base URL (e.g. http://localhost:11434)" : "Base URL (optional override)"
+    }
+
+    private var secretPrompt: String {
+        isNew ? "API key (optional — stored securely on the daemon)"
+              : "API key (leave blank to keep the current one)"
+    }
+
+    /// The raw credential to store, assembled from the entered fields, or nil to
+    /// leave the connection's stored secret untouched. Bedrock joins the AWS
+    /// parts as `ACCESS:SECRET[:SESSION]` (the connector's static-credential form).
+    private var credentialValue: String? {
+        switch connectorType {
+        case "anthropic", "openai":
+            return trimmedOrNil(apiKey)
+        case "bedrock":
+            guard let access = trimmedOrNil(awsAccessKey), let secret = trimmedOrNil(awsSecretKey) else {
+                return nil
+            }
+            if let session = trimmedOrNil(awsSessionToken) {
+                return "\(access):\(secret):\(session)"
+            }
+            return "\(access):\(secret)"
+        default:
+            return nil
+        }
     }
 
     private func label(for type: String) -> String {
@@ -281,6 +316,11 @@ private struct ConnectionEditorSheet: View {
                 try await model.core.createConnection(id: slug, config: config)
             } else {
                 try await model.core.updateConnection(id: slug, config: config)
+            }
+            // Store any directly-entered credential in the daemon's secret store.
+            // Blank = leave the existing secret untouched.
+            if let credential = credentialValue {
+                try await model.core.setConnectionSecret(id: slug, credential: credential)
             }
             dismiss()
         } catch {

@@ -172,4 +172,20 @@ import Foundation
         let decoded = try JSONDecoder().decode(ConnectionConfigInput.self, from: configData)
         #expect(decoded == original)
     }
+
+    // MARK: set_connection_secret (raw credential, never in daemon.toml)
+
+    @Test func setConnectionSecretShape() throws {
+        let json = AdeleCommand.setConnectionSecret(
+            id: "bedrock", credential: "AKIA123:secret456:token789"
+        )
+        let p = try payload(json, key: "set_connection_secret")
+        #expect(p["id"] as? String == "bedrock")
+        #expect(p["credential"] as? String == "AKIA123:secret456:token789")
+    }
+
+    @Test func setConnectionSecretEmptyClears() throws {
+        let p = try payload(AdeleCommand.setConnectionSecret(id: "c", credential: ""), key: "set_connection_secret")
+        #expect(p["credential"] as? String == "")
+    }
 }

@@ -206,4 +206,18 @@ extension AdeleCommand {
         }
         return encode(Cmd(delete_connection: .init(id: id, force: force)))
     }
+
+    /// Store (or clear) a connection's raw credential in the daemon's secret
+    /// store (never in daemon.toml, never echoed back). Empty `credential`
+    /// clears it. For Bedrock the value is
+    /// `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]`; for api-key connectors
+    /// it is the raw key.
+    /// `{"set_connection_secret":{"id":"<slug>","credential":"..."}}`
+    public static func setConnectionSecret(id: String, credential: String) -> String {
+        struct Cmd: Encodable {
+            struct P: Encodable { let id: String; let credential: String }
+            let set_connection_secret: P
+        }
+        return encode(Cmd(set_connection_secret: .init(id: id, credential: credential)))
+    }
 }

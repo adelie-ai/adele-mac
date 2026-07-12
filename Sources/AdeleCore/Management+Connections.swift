@@ -30,4 +30,15 @@ extension AdeleCore {
     public func deleteConnection(id: String, force: Bool = false) async throws {
         _ = try await sendCommand(AdeleCommand.deleteConnection(id: id, force: force))
     }
+
+    /// Store (or clear) a connection's raw credential in the daemon's secret
+    /// store — never in daemon.toml, never echoed back. Empty `credential`
+    /// clears it. For Bedrock the value is
+    /// `ACCESS_KEY_ID:SECRET_ACCESS_KEY[:SESSION_TOKEN]`; for api-key connectors
+    /// the raw key. Lets hosted/end-user setups supply credentials directly
+    /// without requiring env vars or `~/.aws/config`. Throws on failure.
+    @MainActor
+    public func setConnectionSecret(id: String, credential: String) async throws {
+        _ = try await sendCommand(AdeleCommand.setConnectionSecret(id: id, credential: credential))
+    }
 }
