@@ -278,15 +278,24 @@ private struct ConnectionEditorSheet: View {
         }
     }
 
-    /// Pre-fill from the existing row. Only id + connector type are known from
-    /// the connections list; secret-free config fields are entered fresh.
+    /// Pre-fill from the existing row: id, connector type, and the daemon-echoed
+    /// non-secret config (base_url, api_key_env, region, timeouts, …). Secrets
+    /// are never echoed, so credential fields stay blank (re-enter to keep).
     private func prefill() {
-        if case .existing(let c) = target {
-            id = c.id
-            if ConnectionConfigInput.allConnectorTypes.contains(c.connectorType) {
-                connectorType = c.connectorType
-            }
+        guard case .existing(let c) = target else { return }
+        id = c.id
+        if ConnectionConfigInput.allConnectorTypes.contains(c.connectorType) {
+            connectorType = c.connectorType
         }
+        guard let cfg = c.config else { return }
+        baseURL = cfg.baseURL ?? ""
+        apiKeyEnv = cfg.apiKeyEnv ?? ""
+        awsProfile = cfg.awsProfile ?? ""
+        region = cfg.region ?? ""
+        keepWarm = cfg.keepWarm ?? false
+        connectTimeout = cfg.connectTimeoutSecs.map(String.init) ?? ""
+        streamTimeout = cfg.streamTimeoutSecs.map(String.init) ?? ""
+        maxTokens = cfg.maxContextTokens.map(String.init) ?? ""
     }
 
     private func buildConfig() -> ConnectionConfigInput {

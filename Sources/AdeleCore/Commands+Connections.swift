@@ -6,7 +6,7 @@ import Foundation
 /// field omitted (matching serde `skip_serializing_if = "Option::is_none"`).
 /// It is `Codable` so an edit dialog can also pre-fill from a daemon-echoed
 /// config. All numeric fields are `UInt64` to mirror the Rust `u64`.
-public enum ConnectionConfigInput: Codable, Equatable, Sendable {
+public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
     case anthropic(
         baseURL: String? = nil,
         apiKeyEnv: String? = nil,

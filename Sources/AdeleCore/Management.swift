@@ -43,12 +43,26 @@ public struct ConnectionView: Decodable, Identifiable, Hashable, Sendable {
     public let displayLabel: String
     public let availability: ConnectionAvailability
     public let hasCredentials: Bool
+    /// The daemon-echoed non-secret config (base_url, api_key_env, region, …),
+    /// so an edit dialog can pre-fill. Absent on older daemons. Secrets are
+    /// never included here.
+    public let config: ConnectionConfigInput?
 
     enum CodingKeys: String, CodingKey {
-        case id, availability
+        case id, availability, config
         case connectorType = "connector_type"
         case displayLabel = "display_label"
         case hasCredentials = "has_credentials"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        connectorType = try c.decode(String.self, forKey: .connectorType)
+        displayLabel = try c.decode(String.self, forKey: .displayLabel)
+        availability = try c.decode(ConnectionAvailability.self, forKey: .availability)
+        hasCredentials = try c.decode(Bool.self, forKey: .hasCredentials)
+        config = try? c.decodeIfPresent(ConnectionConfigInput.self, forKey: .config)
     }
 }
 

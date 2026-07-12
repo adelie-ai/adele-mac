@@ -421,26 +421,45 @@ private struct MessageBubble: View {
     }
 
     private var bubble: some View {
-        HStack {
-            if message.isUser { Spacer(minLength: 40) }
-            Group {
-                if message.isUser {
-                    Text(message.content).textSelection(.enabled)
-                } else if message.content.isEmpty && message.streaming {
-                    Text("…").foregroundStyle(.secondary)
-                } else {
-                    MarkdownView(text: message.content)
-                }
+        HStack(alignment: .top, spacing: 8) {
+            if message.isUser {
+                Spacer(minLength: 40)
+                bubbleContent
+                avatar
+            } else {
+                avatar
+                bubbleContent
+                Spacer(minLength: 40)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                message.isUser ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
-                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-            )
-            .foregroundStyle(message.isUser ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-            if !message.isUser { Spacer(minLength: 40) }
         }
+    }
+
+    private var avatar: some View {
+        Image(systemName: message.isUser ? "person.crop.circle.fill" : "sparkle")
+            .font(.system(size: 15))
+            .foregroundStyle(message.isUser ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+            .frame(width: 22, height: 22)
+            .padding(.top, 4)
+            .accessibilityHidden(true)
+    }
+
+    private var bubbleContent: some View {
+        Group {
+            if message.isUser {
+                Text(message.content).textSelection(.enabled)
+            } else if message.content.isEmpty && message.streaming {
+                Text("…").foregroundStyle(.secondary)
+            } else {
+                MarkdownView(text: message.content)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            message.isUser ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+        )
+        .foregroundStyle(message.isUser ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
     }
 }
 
