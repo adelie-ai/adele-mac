@@ -197,16 +197,7 @@ private struct ConnectionEditorSheet: View {
                         Toggle("Keep model warm (keep_warm)", isOn: $keepWarm)
                     }
                 } footer: {
-                    if connectorType == "anthropic" || connectorType == "openai" {
-                        Text("Provide the key either via an environment variable on the daemon (`api_key_env`) **or** by entering it here — it's stored in the daemon's secret store, never in daemon.toml.")
-                            .font(.caption)
-                    } else if connectorType == "bedrock" {
-                        Text("Enter AWS keys to store them securely on the daemon (no `~/.aws` or env vars needed), or leave blank to use ambient credentials (profile / role / IRSA).")
-                            .font(.caption)
-                    } else {
-                        Text("Ollama runs locally and needs no credentials.")
-                            .font(.caption)
-                    }
+                    Text(credentialFooter).font(.caption)
                 }
 
                 Section("Advanced (optional)") {
@@ -240,7 +231,21 @@ private struct ConnectionEditorSheet: View {
 
     private var secretPrompt: String {
         isNew ? "API key (optional — stored securely on the daemon)"
-              : "API key (leave blank to keep the current one)"
+              : "API key (re-enter to keep — saving an edit clears the stored key)"
+    }
+
+    private var credentialFooter: String {
+        // Saving an edit rewrites the connection config, which clears its stored
+        // secret coordinate — so on edit the credential must be re-entered to keep it.
+        let editNote = isNew ? "" : " Saving this edit clears the stored credential — re-enter it to keep it."
+        switch connectorType {
+        case "anthropic", "openai":
+            return "Provide the key via an environment variable on the daemon (api_key_env) or by entering it here — stored in the daemon's secret store, never in daemon.toml." + editNote
+        case "bedrock":
+            return "Enter AWS keys to store them securely on the daemon (no ~/.aws or env vars needed), or leave blank to use ambient credentials (profile / role / IRSA)." + editNote
+        default:
+            return "Ollama runs locally and needs no credentials."
+        }
     }
 
     /// The raw credential to store, assembled from the entered fields, or nil to
