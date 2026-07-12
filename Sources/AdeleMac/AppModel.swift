@@ -66,6 +66,18 @@ final class AppModel {
     /// "disabled" | "on_demand" | "always".
     var adeleOutputLevel = "disabled"
 
+    // Speech voice preferences (persisted in UserDefaults). `nil` voice = system
+    // default; rate is an AVSpeechUtterance rate (0…1); pitch is 0.5…2.0.
+    var voiceIdentifier: String? = nil {
+        didSet { UserDefaults.standard.set(voiceIdentifier, forKey: "voiceIdentifier") }
+    }
+    var speechRate: Double = 0.5 {
+        didSet { UserDefaults.standard.set(speechRate, forKey: "speechRate") }
+    }
+    var speechPitch: Double = 1.0 {
+        didSet { UserDefaults.standard.set(speechPitch, forKey: "speechPitch") }
+    }
+
     // Transient toast
     var toast: String?
     private var toastTask: Task<Void, Never>?
@@ -96,6 +108,16 @@ final class AppModel {
         }
         store = ProfileStore.load()
         profiles = store.profiles
+
+        // Load persisted voice preferences (init assignments don't fire didSet).
+        let defaults = UserDefaults.standard
+        voiceIdentifier = defaults.string(forKey: "voiceIdentifier")
+        if defaults.object(forKey: "speechRate") != nil {
+            speechRate = defaults.double(forKey: "speechRate")
+        }
+        if defaults.object(forKey: "speechPitch") != nil {
+            speechPitch = defaults.double(forKey: "speechPitch")
+        }
     }
 
     // MARK: - Profiles
@@ -228,6 +250,13 @@ final class AppModel {
 
     func stopSpeaking() {
         speaker.stop()
+    }
+
+    /// Speak a sample line with the current voice settings (Voice settings preview).
+    func previewVoice() {
+        speaker.stop()
+        speaker.speak("Hi, I'm Adele — this is how I sound.",
+                      voiceIdentifier: voiceIdentifier, rate: Float(speechRate), pitch: Float(speechPitch))
     }
 
     func selectModel(_ listing: ModelListing, effort: String = "") {
@@ -491,7 +520,7 @@ final class AppModel {
             completeStreaming(text)
 
         case .speak(let text):
-            speaker.speak(text)
+            speaker.speak(text, voiceIdentifier: voiceIdentifier, rate: Float(speechRate), pitch: Float(speechPitch))
 
         case .adeleOutputDropdown(let level):
             adeleOutputLevel = level

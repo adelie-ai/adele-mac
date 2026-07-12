@@ -17,6 +17,8 @@ struct SettingsView: View {
                 .tabItem { Label("MCP", systemImage: "puzzlepiece.extension") }
             PersonalitySettingsView()
                 .tabItem { Label("Personality", systemImage: "theatermasks") }
+            VoiceSettingsView()
+                .tabItem { Label("Voice", systemImage: "waveform") }
         }
         .frame(width: 560, height: 460)
         .task { model.loadSettings() }
