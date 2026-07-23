@@ -26,6 +26,23 @@ import Foundation
         #expect(config["connection"] as? String == "bedrock")
         #expect(config["model"] as? String == "us.anthropic.claude-x")
         #expect(config["effort"] == nil, "effort must be omitted when nil (PurposeConfigView skips None)")
+        #expect(config["max_context_tokens"] == nil, "omitted when nil (skip_serializing_if)")
+    }
+
+    /// `SetPurpose` is a full replace, so a binding carrying a context-window
+    /// override (desktop-assistant#51) must put it back on the wire.
+    @Test func setPurposeCarriesMaxContextTokens() throws {
+        let json = AdeleCommand.setPurpose("embedding", config: PurposeConfigView(
+            connection: "default", model: "nomic-embed-text",
+            effort: "low", maxContextTokens: 8192
+        ))
+        let payload = try #require((try object(json))["set_purpose"] as? [String: Any])
+        #expect(payload["purpose"] as? String == "embedding")
+        let config = try #require(payload["config"] as? [String: Any])
+        #expect(config["connection"] as? String == "default")
+        #expect(config["model"] as? String == "nomic-embed-text")
+        #expect(config["effort"] as? String == "low")
+        #expect(config["max_context_tokens"] as? UInt64 == 8192)
     }
 
     @Test func setPurposeIncludesEffort() throws {

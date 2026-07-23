@@ -427,6 +427,7 @@ final class AppModel {
         }
     }
 
+    /// The daemon's last reported binding for `kind`, if it has one.
     func purpose(for kind: String) -> PurposeConfigView? {
         switch kind {
         case "interactive": return purposes.interactive
@@ -434,15 +435,33 @@ final class AppModel {
         case "consolidation": return purposes.consolidation
         case "embedding": return purposes.embedding
         case "titling": return purposes.titling
+        case "voice": return purposes.voice
         default: return nil
         }
     }
 
     /// Assign a purpose (e.g. "interactive") to a model. Reloads purposes after.
+    ///
+    /// Every write goes through `PurposeWrite.planned`, which drops anything the
+    /// UI could not honestly have displayed (an unloaded model list, a mixed
+    /// `"primary"` pair) and anything equal to what the daemon already reports.
+    /// The latter is what keeps a refresh-then-reconcile from writing: see
+    /// adele-gtk#142, where that loop ran at ~3 writes/sec until the socket
+    /// dropped. `SetPurpose` is a full replace, so the fields this UI does not
+    /// edit are carried off the last reported binding rather than cleared.
     func setPurpose(_ purpose: String, connectionID: String, modelID: String) {
+        let lastKnown = self.purpose(for: purpose)
+        guard let config = PurposeWrite.planned(
+            purpose: purpose,
+            selection: PurposeSelection(
+                pick: (connection: connectionID, model: modelID),
+                carryingFrom: lastKnown
+            ),
+            lastKnown: lastKnown
+        ) else { return }
         Task {
             do {
-                try await core.setPurpose(purpose, connection: connectionID, model: modelID)
+                try await core.setPurpose(purpose, config: config)
                 purposes = try await core.getPurposes()
             } catch {
                 settingsError = "\(error)"
