@@ -9,7 +9,7 @@ public enum MessageKind: String, Decodable, Hashable, Sendable, CaseIterable {
     /// An ordinary user / assistant / system / tool message.
     case normal
     /// A line Adele spoke aloud via the `say_this` voice tool (on-demand mode).
-    /// A real transcript entry, rendered with a "Spoken" marker.
+    /// A real transcript entry, badged "Spoken".
     case spoken
     /// A `say_this` the client did not speak because voice output is off — shown
     /// but not voiced.
@@ -18,10 +18,10 @@ public enum MessageKind: String, Decodable, Hashable, Sendable, CaseIterable {
     /// Decode from the wire spelling, tolerating both the field's absence and a
     /// value this build doesn't know.
     ///
-    /// Absence is the common case, not an edge case: older daemons predate
-    /// `MessageKind` entirely, and today's FFI `ChatMessageDto` doesn't project
-    /// it either — so `nil` must mean `.normal`, never a decode failure that
-    /// would sink the whole transcript. Spelling is normalized (case- and
+    /// Absence is not an edge case: older daemons predate `MessageKind`
+    /// entirely, and an older core omits it from the view-events — so `nil` must
+    /// mean `.normal`, never a decode failure that would sink the whole
+    /// transcript or drop a note. Spelling is normalized (case- and
     /// underscore-insensitive) because serde's default is PascalCase (`Spoken`)
     /// while the view-event tags are renamed to snake_case; accepting both keeps
     /// this working whichever way the DTO ends up serialized.
@@ -63,24 +63,4 @@ public enum MessageKind: String, Decodable, Hashable, Sendable, CaseIterable {
         }
     }
 
-    /// Recover the kind from an `inline_note` view-event's text.
-    ///
-    /// Interim bridge. The FFI boundary has no `kind` field on `inline_note`: it
-    /// stringifies the metadata into the text instead (client-ui-ffi's
-    /// `view_event.rs`, the KDE-era interim presentation). Splitting the marker
-    /// back off here confines the string-matching to one tested function and lets
-    /// the transcript render a real badge; when the FFI projects `kind` properly
-    /// this collapses to reading the field, and the markers below go away.
-    public static func fromInlineNote(_ text: String) -> (kind: MessageKind, content: String) {
-        if text.hasPrefix(spokenMarker) {
-            return (.spoken, String(text.dropFirst(spokenMarker.count)))
-        }
-        if text.hasPrefix(speechDisabledMarker) {
-            return (.speechDisabled, String(text.dropFirst(speechDisabledMarker.count)))
-        }
-        return (.normal, text)
-    }
-
-    private static let spokenMarker = "Spoken: "
-    private static let speechDisabledMarker = "(speech mode disabled) "
 }

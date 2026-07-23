@@ -250,13 +250,17 @@ public enum ViewEvent: Decodable, Sendable {
     /// "disabled" | "on_demand" | "always".
     case adeleOutputDropdown(level: String)
     case toast(text: String)
-    case inlineNote(text: String)
+    /// A transcript line the client generated rather than received — a
+    /// `say_this` the voice tool spoke, the same line with speech off, or a
+    /// local notice. `kind` is the same presentation metadata a reloaded
+    /// message carries, so the live path badges from metadata too.
+    case inlineNote(text: String, kind: MessageKind)
     /// Any event not yet typed (scratchpad, voice, …).
     case unknown(type: String)
 
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
-        case selection, model, task, id, entry, entries, notes, level
+        case selection, model, task, id, entry, entries, notes, level, kind
         case messages, editing
         case progressHint = "progress_hint"
     }
@@ -340,7 +344,12 @@ public enum ViewEvent: Decodable, Sendable {
         case "toast":
             self = .toast(text: try c.decode(String.self, forKey: .text))
         case "inline_note":
-            self = .inlineNote(text: try c.decode(String.self, forKey: .text))
+            // A core that predates the structured kind sends no `kind`; that
+            // decodes as `.normal` rather than throwing away the note.
+            self = .inlineNote(
+                text: try c.decode(String.self, forKey: .text),
+                kind: (try? c.decode(MessageKind.self, forKey: .kind)) ?? .normal
+            )
         default:
             self = .unknown(type: type)
         }
