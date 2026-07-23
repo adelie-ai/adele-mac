@@ -115,11 +115,20 @@ private struct ConnectionEditorRow: View {
                 .frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 Text(connection.displayLabel)
-                Text(connection.availability.isOk
-                    ? connection.connectorType
-                    : "\(connection.connectorType) — \(connection.availability.reason ?? "unavailable")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // The daemon's auth-aware preflight reason ("Azure connection
+                // needs a resource endpoint (base_url) and a deployment
+                // (model)", …) is shown verbatim — never reduced to a red dot.
+                if let detail = connection.statusDetail {
+                    Text("\(ConnectionConfigInput.displayName(for: connection.connectorType)) — \(detail)")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                        .help(detail)
+                } else {
+                    Text(ConnectionConfigInput.displayName(for: connection.connectorType))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
             Image(systemName: connection.hasCredentials ? "key.fill" : "key.slash")
@@ -139,15 +148,8 @@ private struct ConnectionEditorSheet: View {
     let target: ConnectionEditorTarget
 
     @State private var id = ""
-    @State private var connectorType = "anthropic"
-    @State private var baseURL = ""
-    @State private var apiKeyEnv = ""
-    @State private var awsProfile = ""
-    @State private var region = ""
-    @State private var keepWarm = false
-    @State private var connectTimeout = ""
-    @State private var streamTimeout = ""
-    @State private var maxTokens = ""
+    /// All non-secret config fields live in the pure, unit-tested form model.
+    @State private var form = ConnectionFormState()
     // Raw credentials entered directly (stored in the daemon's secret store, not
     // in daemon.toml). Blank on edit = keep the existing secret untouched.
     @State private var apiKey = ""
@@ -156,11 +158,15 @@ private struct ConnectionEditorSheet: View {
     @State private var awsSessionToken = ""
     @State private var saving = false
     @State private var errorText: String?
+    /// The daemon's preflight verdict for the connection being edited.
+    @State private var preflightReason: String?
 
     private var isNew: Bool {
         if case .new = target { return true }
         return false
     }
+
+    private var connectorType: String { form.connectorType }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -173,41 +179,92 @@ private struct ConnectionEditorSheet: View {
                     TextField("Connection id (slug)", text: $id)
                         .disabled(!isNew)
                         .help(isNew ? "Lowercase slug, e.g. \"work\" or \"local-ollama\"." : "The id cannot be changed.")
-                    Picker("Connector type", selection: $connectorType) {
+                    Picker("Connector type", selection: $form.connectorType) {
                         ForEach(ConnectionConfigInput.allConnectorTypes, id: \.self) { type in
-                            Text(label(for: type)).tag(type)
+                            Text(ConnectionConfigInput.displayName(for: type)).tag(type)
                         }
                     }
                 }
 
+                // The daemon refuses to use a connection whose required pieces
+                // are missing and says which ones; show that verdict here too so
+                // an edit session starts from the actual problem.
+                if let preflightReason {
+                    Section {
+                        Label(preflightReason, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .textSelection(.enabled)
+                    }
+                }
+
                 Section {
-                    TextField(baseURLPrompt, text: $baseURL)
-                    if connectorType == "anthropic" || connectorType == "openai" {
-                        TextField("API key env var (api_key_env)", text: $apiKeyEnv)
+                    if connectorType == "google" {
+                        Picker("Auth mode", selection: $form.googleAuthMode) {
+                            ForEach(ConnectionConfigInput.googleAuthModes, id: \.self) { mode in
+                                Text(authModeLabel(mode)).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        TextField("GCP project id (project)", text: $form.project)
+                        TextField("Vertex region (location), e.g. us-central1", text: $form.location)
+                        if form.usesVertexCredentials {
+                            TextField("Service-account JSON path (optional — falls back to ADC)",
+                                      text: $form.credentialsPath)
+                        }
+                    }
+
+                    TextField(form.baseURLPrompt, text: $form.baseURL)
+
+                    if connectorType == "azure" {
+                        Picker("API surface", selection: $form.apiSurface) {
+                            ForEach(ConnectionConfigInput.azureApiSurfaces, id: \.self) { surface in
+                                Text(apiSurfaceLabel(surface)).tag(surface)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        Picker("Auth mode", selection: $form.azureAuthMode) {
+                            ForEach(ConnectionConfigInput.azureAuthModes, id: \.self) { mode in
+                                Text(authModeLabel(mode)).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        if form.usesAzureApiVersion {
+                            TextField("API version (classic surface), e.g. 2024-10-21", text: $form.apiVersion)
+                        }
+                    }
+
+                    if form.usesApiKey {
+                        TextField(form.apiKeyEnvPrompt, text: $form.apiKeyEnv)
                         SecureField(secretPrompt, text: $apiKey)
                     }
                     if connectorType == "bedrock" {
-                        TextField("AWS profile (aws_profile)", text: $awsProfile)
-                        TextField("Region (e.g. us-east-1)", text: $region)
+                        TextField("AWS profile (aws_profile)", text: $form.awsProfile)
+                        TextField("Region (e.g. us-east-1)", text: $form.region)
                         SecureField("AWS Access Key ID (optional)", text: $awsAccessKey)
                         SecureField("AWS Secret Access Key", text: $awsSecretKey)
                         SecureField("AWS Session Token (optional)", text: $awsSessionToken)
                     }
                     if connectorType == "ollama" {
-                        Toggle("Keep model warm (keep_warm)", isOn: $keepWarm)
+                        Toggle("Keep model warm (keep_warm)", isOn: $form.keepWarm)
                     }
                 } footer: {
                     Text(credentialFooter).font(.caption)
                 }
 
                 Section("Advanced (optional)") {
-                    TextField("Connect timeout (secs)", text: $connectTimeout)
-                    TextField("Stream timeout (secs)", text: $streamTimeout)
-                    TextField("Max context tokens", text: $maxTokens)
+                    TextField("Connect timeout (secs)", text: $form.connectTimeout)
+                    TextField("Stream timeout (secs)", text: $form.streamTimeout)
+                    TextField("Max context tokens", text: $form.maxTokens)
                 }
 
                 if let errorText {
-                    Text(errorText).font(.caption).foregroundStyle(.red)
+                    // Includes the daemon's own rejection reason (create/update
+                    // preflight), so a failed save is never silent.
+                    Text(errorText)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
                 }
             }
             .formStyle(.grouped)
@@ -221,12 +278,8 @@ private struct ConnectionEditorSheet: View {
             }
             .padding(16)
         }
-        .frame(width: 480, height: 520)
+        .frame(width: 520, height: 600)
         .onAppear(perform: prefill)
-    }
-
-    private var baseURLPrompt: String {
-        connectorType == "ollama" ? "Base URL (e.g. http://localhost:11434)" : "Base URL (optional override)"
     }
 
     private var secretPrompt: String {
@@ -234,13 +287,40 @@ private struct ConnectionEditorSheet: View {
               : "API key (re-enter to keep — saving an edit clears the stored key)"
     }
 
+    private func apiSurfaceLabel(_ surface: String) -> String {
+        switch surface {
+        case "v1": return "v1 (GA)"
+        case "classic": return "Classic (deployments path)"
+        default: return surface
+        }
+    }
+
+    private func authModeLabel(_ mode: String) -> String {
+        switch mode {
+        case "api_key": return connectorType == "google" ? "API key (AI Studio)" : "API key"
+        case "entra": return "Entra ID / managed identity"
+        case "vertex": return "Vertex AI (ADC / service account)"
+        default: return mode
+        }
+    }
+
     private var credentialFooter: String {
         // Saving an edit rewrites the connection config, which clears its stored
         // secret coordinate — so on edit the credential must be re-entered to keep it.
         let editNote = isNew ? "" : " Saving this edit clears the stored credential — re-enter it to keep it."
+        let apiKeyNote = "Provide the key via an environment variable on the daemon (api_key_env) or by entering it here — stored in the daemon's secret store, never in daemon.toml."
         switch connectorType {
-        case "anthropic", "openai":
-            return "Provide the key via an environment variable on the daemon (api_key_env) or by entering it here — stored in the daemon's secret store, never in daemon.toml." + editNote
+        case "anthropic", "openai", "openrouter":
+            return apiKeyNote + editNote
+        case "azure":
+            let endpointNote = "The resource endpoint is required (e.g. https://<name>.openai.azure.com); the model is the Azure deployment name, chosen in the model picker, not here."
+            if form.usesApiKey { return endpointNote + " " + apiKeyNote + editNote }
+            return endpointNote + " Entra ID mode authenticates with a managed identity — no key needed."
+        case "google":
+            if form.usesVertexCredentials {
+                return "Vertex AI needs a project and a location. Credentials come from the service-account JSON at the path above, or from Application Default Credentials when it is blank — the path is not a secret."
+            }
+            return "Gemini API (AI Studio) mode. " + apiKeyNote + editNote
         case "bedrock":
             return "Enter AWS keys to store them securely on the daemon (no ~/.aws or env vars needed), or leave blank to use ambient credentials (profile / role / IRSA)." + editNote
         default:
@@ -252,9 +332,8 @@ private struct ConnectionEditorSheet: View {
     /// leave the connection's stored secret untouched. Bedrock joins the AWS
     /// parts as `ACCESS:SECRET[:SESSION]` (the connector's static-credential form).
     private var credentialValue: String? {
+        if form.usesApiKey { return trimmedOrNil(apiKey) }
         switch connectorType {
-        case "anthropic", "openai":
-            return trimmedOrNil(apiKey)
         case "bedrock":
             guard let access = trimmedOrNil(awsAccessKey), let secret = trimmedOrNil(awsSecretKey) else {
                 return nil
@@ -268,54 +347,19 @@ private struct ConnectionEditorSheet: View {
         }
     }
 
-    private func label(for type: String) -> String {
-        switch type {
-        case "anthropic": return "Anthropic"
-        case "openai": return "OpenAI"
-        case "bedrock": return "AWS Bedrock"
-        case "ollama": return "Ollama"
-        default: return type.capitalized
-        }
-    }
-
     /// Pre-fill from the existing row: id, connector type, and the daemon-echoed
-    /// non-secret config (base_url, api_key_env, region, timeouts, …). Secrets
-    /// are never echoed, so credential fields stay blank (re-enter to keep).
+    /// non-secret config (base_url, api_key_env, region, project, timeouts, …).
+    /// Secrets are never echoed, so credential fields stay blank (re-enter to
+    /// keep). Also carries over the daemon's preflight verdict.
     private func prefill() {
         guard case .existing(let c) = target else { return }
         id = c.id
-        if ConnectionConfigInput.allConnectorTypes.contains(c.connectorType) {
-            connectorType = c.connectorType
-        }
-        guard let cfg = c.config else { return }
-        baseURL = cfg.baseURL ?? ""
-        apiKeyEnv = cfg.apiKeyEnv ?? ""
-        awsProfile = cfg.awsProfile ?? ""
-        region = cfg.region ?? ""
-        keepWarm = cfg.keepWarm ?? false
-        connectTimeout = cfg.connectTimeoutSecs.map(String.init) ?? ""
-        streamTimeout = cfg.streamTimeoutSecs.map(String.init) ?? ""
-        maxTokens = cfg.maxContextTokens.map(String.init) ?? ""
-    }
-
-    private func buildConfig() -> ConnectionConfigInput {
-        let base = trimmedOrNil(baseURL)
-        let ct = UInt64(connectTimeout.trimmingCharacters(in: .whitespaces))
-        let st = UInt64(streamTimeout.trimmingCharacters(in: .whitespaces))
-        let mt = UInt64(maxTokens.trimmingCharacters(in: .whitespaces))
-        switch connectorType {
-        case "openai":
-            return .openai(baseURL: base, apiKeyEnv: trimmedOrNil(apiKeyEnv),
-                           connectTimeoutSecs: ct, streamTimeoutSecs: st, maxContextTokens: mt)
-        case "bedrock":
-            return .bedrock(awsProfile: trimmedOrNil(awsProfile), region: trimmedOrNil(region),
-                            baseURL: base, connectTimeoutSecs: ct, streamTimeoutSecs: st, maxContextTokens: mt)
-        case "ollama":
-            return .ollama(baseURL: base, connectTimeoutSecs: ct, streamTimeoutSecs: st,
-                           keepWarm: keepWarm, maxContextTokens: mt)
-        default:
-            return .anthropic(baseURL: base, apiKeyEnv: trimmedOrNil(apiKeyEnv),
-                              connectTimeoutSecs: ct, streamTimeoutSecs: st, maxContextTokens: mt)
+        preflightReason = c.statusDetail
+        if let cfg = c.config {
+            form = ConnectionFormState(config: cfg)
+        } else if ConnectionConfigInput.allConnectorTypes.contains(c.connectorType) {
+            // Older daemons don't echo the config; at least keep the type.
+            form = ConnectionFormState(connectorType: c.connectorType)
         }
     }
 
@@ -324,7 +368,7 @@ private struct ConnectionEditorSheet: View {
         guard !slug.isEmpty else { return }
         saving = true
         defer { saving = false }
-        let config = buildConfig()
+        let config = form.build()
         do {
             if isNew {
                 try await model.core.createConnection(id: slug, config: config)
