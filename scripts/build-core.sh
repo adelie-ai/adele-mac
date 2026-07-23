@@ -25,9 +25,15 @@ fi
 RELEASE_FLAG=""
 [[ "$CONFIG" == "release" ]] && RELEASE_FLAG="--release"
 
-echo ">> cargo build -p client-ui-ffi ($CONFIG)"
-# shellcheck disable=SC2086  # intentional word-split of the (empty-or-single) flag
-( cd "$CORE_DIR" && cargo build -p client-ui-ffi $RELEASE_FLAG )
+# Cargo feature flags selecting which built-in MCP servers get compiled into the
+# core (da#538). Set by `just build-with-mcp …`, which turns a server list into
+# the right `--features` string; empty here means the crate default, which links
+# no built-in servers at all (keeping adele-kde's build unchanged).
+CORE_FEATURES="${ADELE_CORE_FEATURES:-}"
+
+echo ">> cargo build -p client-ui-ffi ($CONFIG)${CORE_FEATURES:+ $CORE_FEATURES}"
+# shellcheck disable=SC2086  # intentional word-split of the flag strings
+( cd "$CORE_DIR" && cargo build -p client-ui-ffi $RELEASE_FLAG $CORE_FEATURES )
 
 HEADER_SRC="$CORE_DIR/ffi/include/adele_client_core.h"
 HEADER_DST="$MAC_DIR/Sources/CAdeleCore/include/adele_client_core.h"
