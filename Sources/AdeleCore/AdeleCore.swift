@@ -26,7 +26,10 @@ import Foundation
 // actor, safe to call from any thread), and `onEvent` is assigned once by the
 // owner at setup before any connect drives callbacks.
 public final class AdeleCore: @unchecked Sendable {
-    private var handle: OpaquePointer?
+    // Readable module-wide so per-feature intents can live in their own
+    // `extension AdeleCore` files (e.g. AdeleCore+Queued.swift); only this file
+    // ever assigns it (once, in `init`).
+    private(set) var handle: OpaquePointer?
 
     /// Delivered on the main actor, one per pushed view-event.
     public var onEvent: (@MainActor (ViewEvent) -> Void)?

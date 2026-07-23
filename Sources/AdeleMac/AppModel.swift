@@ -104,7 +104,17 @@ final class AppModel {
     private var toastTask: Task<Void, Never>?
 
     // Composer
-    var draft = ""
+    /// Half-typed text, keyed by conversation id (#7) — switching conversations
+    /// restores that conversation's draft instead of carrying one across.
+    var drafts = DraftStore()
+    /// The live composer text for the open conversation.
+    var draft: String {
+        get { drafts[selectedConversationID] }
+        set { drafts[selectedConversationID] = newValue }
+    }
+    /// The open conversation's message queue (#1), replaced wholesale by each
+    /// `queued_messages` event.
+    var queued = QueuedMessagesState()
 
     // Connection profiles
     var profiles: [Profile] = []
@@ -254,6 +264,7 @@ final class AppModel {
 
     func deleteConversation(_ id: String) {
         core.deleteConversation(id)
+        drafts.forget(id)  // its draft goes with it (#7)
         if selectedConversationID == id {
             selectedConversationID = nil
             messages = []
@@ -280,9 +291,47 @@ final class AppModel {
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, sendEnabled else { return }
-        draft = ""
+        // Deliberately NOT gated on `sendEnabled`: while a reply streams the core
+        // QUEUES the submit rather than refusing it (#1), so the composer must
+        // stay live. `sendEnabled` now only dims the button's affordance.
+        guard !text.isEmpty else { return }
+        // Clear only THIS conversation's draft — a send never touches another's.
+        drafts.clear(selectedConversationID)
         core.sendPrompt(text)
+    }
+
+    // MARK: - Message queue (#1)
+
+    /// Check a queued chip out into the composer for editing. `visibleIndex` is
+    /// the chip's rendered position; the reducer indexes the full queue.
+    func editQueued(visible visibleIndex: Int) {
+        core.editQueued(queued.fullIndex(forVisible: visibleIndex))
+    }
+
+    /// Drop a queued chip without sending it (`RemoveQueued` takes the rendered
+    /// position verbatim).
+    func removeQueued(visible visibleIndex: Int) {
+        core.removeQueued(visibleIndex)
+    }
+
+    func cancelQueuedEdit() {
+        core.cancelQueuedEdit()
+    }
+
+    /// Handle a queue-navigation key pressed in the composer. Returns `true` when
+    /// the key was consumed as a queue action, `false` to let it keep its default
+    /// caret behaviour.
+    func handleRecallKey(_ key: RecallKey) -> Bool {
+        switch queued.decision(for: key, composerEmpty: draft.isEmpty) {
+        case .recall(let index):
+            core.editQueued(index)
+            return true
+        case .cancel:
+            core.cancelQueuedEdit()
+            return true
+        case .proceed:
+            return false
+        }
     }
 
     /// Set the Adele-output (spoken reply) level for the open conversation:
@@ -574,7 +623,21 @@ final class AppModel {
             scratchpad = notes
 
         case .addUserMessage(let content):
+            // Exactly one bubble per send (#8): the core emits this once per
+            // `SendPrompt` effect — for a direct send and for a queue flush (one
+            // combined turn) alike — and its reducer swallows the daemon's echoed
+            // `UserMessageAdded` by idempotency key. Never append a bubble here
+            // from `send()` as well, or the turn draws twice.
             appendUser(content)
+
+        case .composerText(let text):
+            // The reducer drives the composer for queue operations: a recalled
+            // message loads here, and an enqueue / cancelled edit clears it. Only
+            // ever the OPEN conversation's draft.
+            drafts[selectedConversationID] = text
+
+        case .queuedMessages(let messages, let editing):
+            queued = QueuedMessagesState(messages: messages, editing: editing)
 
         case .chunk(let text):
             appendChunk(text)

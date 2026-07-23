@@ -221,6 +221,13 @@ public enum ViewEvent: Decodable, Sendable {
     case clearChatStatus
     case contextUsage(ContextUsage?)
     case addUserMessage(content: String)
+    /// Replace the composer's text (a recalled queued message, or `""` when a
+    /// submit was queued or an edit cancelled).
+    case composerText(text: String)
+    /// The open conversation's queued messages (submit order, excluding any
+    /// checked out for editing) plus the slot being edited — drives the "N
+    /// queued" chips.
+    case queuedMessages(messages: [String], editing: Int?)
     case chunk(text: String)
     case complete(text: String)
     case models([ModelListing])
@@ -247,6 +254,7 @@ public enum ViewEvent: Decodable, Sendable {
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
         case selection, model, task, id, entry, entries, notes, level
+        case messages, editing
         case progressHint = "progress_hint"
     }
 
@@ -278,6 +286,13 @@ public enum ViewEvent: Decodable, Sendable {
             self = .contextUsage(try c.decodeIfPresent(ContextUsage.self, forKey: .usage))
         case "add_user_message":
             self = .addUserMessage(content: try c.decode(String.self, forKey: .content))
+        case "composer_text":
+            self = .composerText(text: try c.decode(String.self, forKey: .text))
+        case "queued_messages":
+            self = .queuedMessages(
+                messages: try c.decode([String].self, forKey: .messages),
+                editing: try c.decodeIfPresent(Int.self, forKey: .editing)
+            )
         case "chunk":
             self = .chunk(text: try c.decode(String.self, forKey: .text))
         case "complete":
