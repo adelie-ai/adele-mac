@@ -76,27 +76,66 @@ import Foundation
         #expect(MessageKind.speechDisabled.accessibilityDescription != nil)
     }
 
-    // Interim bridge: today's FFI stringifies the note's kind into the
-    // `inline_note` text (client-ui-ffi view_event.rs). Recover the structured
-    // kind so the badge — not a text marker — carries it.
-    @Test func inlineNoteMarkersRecoverTheKind() {
-        let spoken = MessageKind.fromInlineNote("Spoken: hello there")
-        #expect(spoken.kind == .spoken)
-        #expect(spoken.content == "hello there")
-
-        let muted = MessageKind.fromInlineNote("(speech mode disabled) hello there")
-        #expect(muted.kind == .speechDisabled)
-        #expect(muted.content == "hello there")
+    // The live path. A `say_this` line spoken DURING a turn is client-generated,
+    // so it arrives as an `inline_note` event rather than in a reloaded
+    // transcript. The kind used to be stringified into that event's text and
+    // split back off here; it now travels structured, so the badge is driven by
+    // metadata on the live path exactly as it already is on reload.
+    @Test func liveSpokenLineBadgesWithoutParsing() throws {
+        guard case .inlineNote(let text, let kind) =
+            try decodeEvent(#"{"type":"inline_note","text":"hello there","kind":"spoken"}"#)
+        else {
+            Issue.record("expected .inlineNote"); return
+        }
+        #expect(kind == .spoken)
+        #expect(kind.badgeLabel == "Spoken")
+        // No marker survives into the bubble's text — the badge carries it.
+        #expect(text == "hello there")
     }
 
-    @Test func inlineNoteWithoutAMarkerIsLeftAlone() {
-        let plain = MessageKind.fromInlineNote("Reconnected to the daemon.")
-        #expect(plain.kind == .normal)
-        #expect(plain.content == "Reconnected to the daemon.")
+    @Test func liveSuppressedLineBadgesWithoutParsing() throws {
+        guard case .inlineNote(let text, let kind) =
+            try decodeEvent(#"{"type":"inline_note","text":"hello there","kind":"speech_disabled"}"#)
+        else {
+            Issue.record("expected .inlineNote"); return
+        }
+        #expect(kind == .speechDisabled)
+        #expect(kind.badgeLabel == "Speech off")
+        #expect(text == "hello there")
+    }
 
-        // A near-miss must not be mangled: only the exact marker prefix counts.
-        let nearMiss = MessageKind.fromInlineNote("Spoken words are cheap")
-        #expect(nearMiss.kind == .normal)
-        #expect(nearMiss.content == "Spoken words are cheap")
+    @Test func anOrdinaryInlineNoteIsUnbadged() throws {
+        guard case .inlineNote(let text, let kind) =
+            try decodeEvent(#"{"type":"inline_note","text":"Reconnected.","kind":"normal"}"#)
+        else {
+            Issue.record("expected .inlineNote"); return
+        }
+        #expect(kind == .normal)
+        #expect(kind.badgeLabel == nil)
+        #expect(text == "Reconnected.")
+    }
+
+    // An older core sends no `kind` on the note. It must decode (not throw), and
+    // its text must be left exactly as sent — including text that merely looks
+    // like the retired marker, which is the string-matching this change retires.
+    @Test func inlineNoteWithoutAKindIsOrdinaryAndUnparsed() throws {
+        guard case .inlineNote(let text, let kind) =
+            try decodeEvent(#"{"type":"inline_note","text":"Spoken: hello there"}"#)
+        else {
+            Issue.record("expected .inlineNote"); return
+        }
+        #expect(kind == .normal)
+        #expect(text == "Spoken: hello there")
+    }
+
+    // Forward-compat, matching the transcript path: an unknown token renders as
+    // an ordinary note rather than failing the event decode.
+    @Test func inlineNoteWithAnUnknownKindIsOrdinary() throws {
+        guard case .inlineNote(_, let kind) =
+            try decodeEvent(#"{"type":"inline_note","text":"x","kind":"whispered"}"#)
+        else {
+            Issue.record("expected .inlineNote"); return
+        }
+        #expect(kind == .normal)
     }
 }
