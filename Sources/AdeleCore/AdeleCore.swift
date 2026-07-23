@@ -123,6 +123,23 @@ public final class AdeleCore: @unchecked Sendable {
         adele_core_set_share_client_context(handle, enabled)
     }
 
+    /// This client's `client-mcp.toml` surface name. Must match an entry in
+    /// `client-common`'s `CLIENT_SURFACES`, which is the shared source of truth
+    /// admin UIs enumerate — a name absent from that list resolves nothing.
+    public static let macMcpSurface = "mac"
+
+    /// Declare which `client-mcp.toml` surface this client resolves its MCP
+    /// servers (and built-in opt-outs) under. Server definitions are
+    /// machine-wide; the surface is the per-client enable layer, so the same
+    /// servers can be configured once and switched on per client.
+    ///
+    /// The core shares its cdylib with adele-kde and defaults to `kde`, so this
+    /// must be set before `connect` or the Mac silently adopts KDE's selection.
+    public func setMcpSurface(_ surface: String) {
+        guard let handle else { return }
+        adele_core_set_mcp_surface(handle, surface)
+    }
+
     public func sendPrompt(_ text: String) {
         guard let handle else { return }
         adele_core_send_prompt(handle, text)
