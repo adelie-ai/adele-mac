@@ -27,6 +27,21 @@ public struct ChatMessage: Decodable, Identifiable, Hashable, Sendable {
     public let id: String
     public let role: String
     public let content: String
+    /// Presentation metadata (voice#126) — `.normal` for daemon-sourced messages,
+    /// `.spoken` / `.speechDisabled` for the lines a client tags itself. Absent
+    /// on older daemons (and on cores whose `ChatMessageDto` doesn't project it
+    /// yet), which `MessageKind` decodes as `.normal`.
+    public let kind: MessageKind
+
+    enum CodingKeys: String, CodingKey { case id, role, content, kind }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        role = try c.decode(String.self, forKey: .role)
+        content = try c.decode(String.self, forKey: .content)
+        kind = (try? c.decode(MessageKind.self, forKey: .kind)) ?? .normal
+    }
 }
 
 /// The open conversation (already debug-filtered by the reducer). `model_selection`

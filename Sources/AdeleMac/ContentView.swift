@@ -465,6 +465,7 @@ private struct MessageBubble: View {
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.vertical, 2)
+                .messageKindBadge(message.kind, alignment: .center)
         } else {
             bubble
         }
@@ -510,6 +511,7 @@ private struct MessageBubble: View {
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
         .foregroundStyle(message.isUser ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
+        .messageKindBadge(message.kind, alignment: message.isUser ? .trailing : .leading)
     }
 }
 
