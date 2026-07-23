@@ -61,12 +61,17 @@ public enum AdeleCommand {
         return encode(Cmd(search_knowledge_entries: .init(query: query, limit: limit)))
     }
 
+    /// Tags are normalized to the daemon's canonical kind/facet form on the way
+    /// out (see `KnowledgeTag`), so a written tag matches what a later refetch —
+    /// and every tag filter — returns.
     public static func createKnowledge(content: String, tags: [String]) -> String {
         struct Cmd: Encodable {
             struct P: Encodable { let content: String; let tags: [String] }
             let create_knowledge_entry: P
         }
-        return encode(Cmd(create_knowledge_entry: .init(content: content, tags: tags)))
+        return encode(Cmd(create_knowledge_entry: .init(
+            content: content, tags: KnowledgeTag.normalize(tags)
+        )))
     }
 
     public static func updateKnowledge(id: String, content: String, tags: [String]) -> String {
@@ -74,7 +79,9 @@ public enum AdeleCommand {
             struct P: Encodable { let id: String; let content: String; let tags: [String] }
             let update_knowledge_entry: P
         }
-        return encode(Cmd(update_knowledge_entry: .init(id: id, content: content, tags: tags)))
+        return encode(Cmd(update_knowledge_entry: .init(
+            id: id, content: content, tags: KnowledgeTag.normalize(tags)
+        )))
     }
 
     public static func deleteKnowledge(id: String) -> String {

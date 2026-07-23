@@ -219,6 +219,9 @@ public enum ViewEvent: Decodable, Sendable {
     case taskCompleted(id: String)
     case taskLogs(id: String, entries: [TaskLogEntry])
     case scratchpad([ScratchpadNote])
+    /// The user's knowledge base changed (create/update/delete or a maintenance
+    /// pass writing entries). Carries no payload — the browser refetches.
+    case knowledgeChanged
     /// Speak `text` aloud (the client owns text-to-speech).
     case speak(text: String)
     /// Reflect the active conversation's Adele-output level on the control:
@@ -298,6 +301,8 @@ public enum ViewEvent: Decodable, Sendable {
             )
         case "scratchpad":
             self = .scratchpad(try c.decode([ScratchpadNote].self, forKey: .notes))
+        case "knowledge_changed":
+            self = .knowledgeChanged
         case "speak":
             self = .speak(text: try c.decode(String.self, forKey: .text))
         case "adele_output_dropdown":
