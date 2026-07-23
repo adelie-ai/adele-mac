@@ -521,17 +521,47 @@ private struct ComposerView: View {
 
     var body: some View {
         @Bindable var model = model
-        HStack(alignment: .bottom, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Messages queued while a reply streams (#1), above the live composer.
+            QueuedChipsView()
+            composer
+        }
+        .alert("Dictation", isPresented: Binding(
+            get: { dictationError != nil },
+            set: { if !$0 { dictationError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(dictationError ?? "")
+        }
+    }
+
+    private var composer: some View {
+        @Bindable var model = model
+        return HStack(alignment: .bottom, spacing: 8) {
             TextField("Message Adele…", text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...6)
                 .padding(8)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 .onKeyPress(keys: [.return]) { press in
-                    // Return sends; Shift+Return inserts a newline.
+                    // Return sends; Shift+Return inserts a newline. Never gated on
+                    // the streaming state — a send mid-reply is QUEUED (#1).
                     if press.modifiers.contains(.shift) { return .ignored }
                     model.send()
                     return .handled
+                }
+                .onKeyPress(keys: [.upArrow, .downArrow, .escape]) { press in
+                    // Walk the message queue: Up on an empty composer recalls the
+                    // last queued message, Down steps back out, Esc abandons the
+                    // edit. Anything else keeps its default caret behaviour.
+                    let key: RecallKey
+                    switch press.key {
+                    case .upArrow: key = .up
+                    case .downArrow: key = .down
+                    default: key = .escape
+                    }
+                    return model.handleRecallKey(key) ? .handled : .ignored
                 }
             Button {
                 toggleDictation()
@@ -550,17 +580,13 @@ private struct ComposerView: View {
                     .font(.system(size: 26))
             }
             .buttonStyle(.plain)
-            .disabled(!model.sendEnabled || model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            // Only the empty-draft gate: `sendEnabled` is false while a reply
+            // streams, but a send then QUEUES rather than being refused (#1), so
+            // the control must stay live.
+            .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .help(model.sendEnabled ? "Send" : "Queue this message (a reply is still streaming)")
         }
         .padding(12)
-        .alert("Dictation", isPresented: Binding(
-            get: { dictationError != nil },
-            set: { if !$0 { dictationError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(dictationError ?? "")
-        }
     }
 
     private func toggleDictation() {
