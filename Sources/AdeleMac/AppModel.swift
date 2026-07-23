@@ -161,6 +161,12 @@ final class AppModel {
         // saved opt-out wouldn't survive a relaunch.
         shareClientContext = clientContextPrefs.isEnabled
         core.setShareClientContext(shareClientContext)
+
+        // Claim this client's own MCP surface before the first connect. The core
+        // is shared with adele-kde and defaults to `kde`, so without this the Mac
+        // resolves its client MCP servers — and its built-in opt-outs — from
+        // KDE's section of client-mcp.toml.
+        core.setMcpSurface(AdeleCore.macMcpSurface)
     }
 
     // MARK: - Profiles
