@@ -669,13 +669,9 @@ final class AppModel {
         case .toast(let text):
             showToast(text)
 
-        case .inlineNote(let text):
-            // The FFI stringifies the note's `MessageKind` into the text (the
-            // KDE-era interim presentation); split it back off so the badge — not
-            // a text marker — carries it.
-            let note = MessageKind.fromInlineNote(text)
+        case .inlineNote(let text, let kind):
             messages.append(
-                DisplayMessage(id: freshID(), role: "note", content: note.content, kind: note.kind)
+                DisplayMessage(id: freshID(), role: "note", content: text, kind: kind)
             )
 
         case .unknown:

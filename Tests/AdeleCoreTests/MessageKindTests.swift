@@ -2,10 +2,11 @@ import Testing
 import Foundation
 @testable import AdeleCore
 
-/// Spec: `ChatMessage` carries api-model's `MessageKind` presentation metadata
-/// (voice#126) so the transcript can badge a Spoken / SpeechDisabled turn without
-/// parsing its content — and the decode tolerates the field's absence, because
-/// older daemons (and today's FFI `ChatMessageDto`) don't emit it.
+/// Spec: both paths that put a bubble on screen — a reloaded `ChatMessage` and
+/// a live `inline_note` — carry api-model's `MessageKind` presentation metadata
+/// (voice#126), so the transcript badges a Spoken / SpeechDisabled turn without
+/// parsing its content. The decode tolerates the field's absence, because older
+/// daemons and older cores don't emit it.
 @Suite struct MessageKindTests {
     private func decodeMessage(_ json: String) throws -> ChatMessage {
         try JSONDecoder().decode(ChatMessage.self, from: Data(json.utf8))
