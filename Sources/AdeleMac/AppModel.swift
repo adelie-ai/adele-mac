@@ -9,10 +9,13 @@ struct DisplayMessage: Identifiable, Hashable {
     let role: String
     var content: String
     var streaming: Bool = false
+    /// Presentation metadata (voice#126): `.spoken` / `.speechDisabled` turns get
+    /// a badge in the transcript, `.normal` ones (nearly all) get nothing.
+    var kind: MessageKind = .normal
 
     var isUser: Bool { role == "user" }
-    /// An inline transcript note (e.g. a "(speech mode disabled)" downgrade),
-    /// rendered centered rather than as a chat bubble.
+    /// An inline transcript note (e.g. a speech-disabled downgrade, whose marker
+    /// now lives in `kind`), rendered centered rather than as a chat bubble.
     var isNote: Bool { role == "note" }
 }
 
@@ -85,6 +88,17 @@ final class AppModel {
         didSet { UserDefaults.standard.set(speechPitch, forKey: "speechPitch") }
     }
 
+    // Privacy: "Share device info with the assistant" (#549). Persisted locally;
+    // every change is staged on the core, which applies it when the next
+    // (re)connect builds its config — the Privacy settings tab says so.
+    private let clientContextPrefs = ClientContextPreference()
+    var shareClientContext = ClientContextPreference.defaultValue {
+        didSet {
+            clientContextPrefs.isEnabled = shareClientContext
+            core.setShareClientContext(shareClientContext)
+        }
+    }
+
     // Transient toast
     var toast: String?
     private var toastTask: Task<Void, Never>?
@@ -125,6 +139,13 @@ final class AppModel {
         if defaults.object(forKey: "speechPitch") != nil {
             speechPitch = defaults.double(forKey: "speechPitch")
         }
+
+        // Stage the persisted "share device info" choice on the core before the
+        // first connect. The assignment above doesn't fire didSet (init), so push
+        // it explicitly — otherwise the core would keep its own ON default and a
+        // saved opt-out wouldn't survive a relaunch.
+        shareClientContext = clientContextPrefs.isEnabled
+        core.setShareClientContext(shareClientContext)
     }
 
     // MARK: - Profiles
@@ -498,7 +519,7 @@ final class AppModel {
         case .loadConversation(let detail):
             selectedConversationID = detail.id
             messages = detail.messages.map {
-                DisplayMessage(id: $0.id, role: $0.role, content: $0.content)
+                DisplayMessage(id: $0.id, role: $0.role, content: $0.content, kind: $0.kind)
             }
 
         case .clearChat:
@@ -571,7 +592,13 @@ final class AppModel {
             showToast(text)
 
         case .inlineNote(let text):
-            messages.append(DisplayMessage(id: freshID(), role: "note", content: text))
+            // The FFI stringifies the note's `MessageKind` into the text (the
+            // KDE-era interim presentation); split it back off so the badge — not
+            // a text marker — carries it.
+            let note = MessageKind.fromInlineNote(text)
+            messages.append(
+                DisplayMessage(id: freshID(), role: "note", content: note.content, kind: note.kind)
+            )
 
         case .unknown:
             break

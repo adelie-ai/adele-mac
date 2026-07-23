@@ -109,6 +109,17 @@ public final class AdeleCore: @unchecked Sendable {
         adele_core_set_ws_jwt(handle, jwt)
     }
 
+    /// Stage the "share device info with the assistant" opt-out (#549) for the
+    /// next `connect`. `true` (the default) lets the daemon fold this Mac's
+    /// context — device name, username, home folder, hostname, time zone, OS —
+    /// into the system prompt; `false` sends none of it. The core stages the flag
+    /// and applies it when the next (re)connect builds its `ConnectionConfig`, so
+    /// a change takes effect on the following connection, not the live one.
+    public func setShareClientContext(_ enabled: Bool) {
+        guard let handle else { return }
+        adele_core_set_share_client_context(handle, enabled)
+    }
+
     public func sendPrompt(_ text: String) {
         guard let handle else { return }
         adele_core_send_prompt(handle, text)
