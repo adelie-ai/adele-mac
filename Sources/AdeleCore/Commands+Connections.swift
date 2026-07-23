@@ -21,6 +21,41 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
         streamTimeoutSecs: UInt64? = nil,
         maxContextTokens: UInt64? = nil
     )
+    /// OpenRouter carries the same non-secret fields as `.openai`.
+    case openrouter(
+        baseURL: String? = nil,
+        apiKeyEnv: String? = nil,
+        connectTimeoutSecs: UInt64? = nil,
+        streamTimeoutSecs: UInt64? = nil,
+        maxContextTokens: UInt64? = nil
+    )
+    /// Azure OpenAI: the OpenAI-compatible fields plus surface/auth/version knobs.
+    /// `baseURL` is the *resource* endpoint (`https://<name>.openai.azure.com`)
+    /// and has no default; `apiVersion` only applies on the `classic` surface.
+    case azure(
+        baseURL: String? = nil,
+        apiKeyEnv: String? = nil,
+        apiSurface: String? = nil,
+        authMode: String? = nil,
+        apiVersion: String? = nil,
+        connectTimeoutSecs: UInt64? = nil,
+        streamTimeoutSecs: UInt64? = nil,
+        maxContextTokens: UInt64? = nil
+    )
+    /// Google Vertex AI (default) / Gemini API: project + region + auth knobs.
+    /// `baseURL` is usually blank — the connector composes the Vertex host from
+    /// `location`. `credentialsPath` is a filesystem path, not a secret.
+    case google(
+        baseURL: String? = nil,
+        apiKeyEnv: String? = nil,
+        project: String? = nil,
+        location: String? = nil,
+        authMode: String? = nil,
+        credentialsPath: String? = nil,
+        connectTimeoutSecs: UInt64? = nil,
+        streamTimeoutSecs: UInt64? = nil,
+        maxContextTokens: UInt64? = nil
+    )
     case bedrock(
         awsProfile: String? = nil,
         region: String? = nil,
@@ -47,15 +82,25 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
         case awsProfile = "aws_profile"
         case region
         case keepWarm = "keep_warm"
+        case apiSurface = "api_surface"
+        case authMode = "auth_mode"
+        case apiVersion = "api_version"
+        case project
+        case location
+        case credentialsPath = "credentials_path"
     }
 
     // MARK: Accessors (for pre-filling / rendering an edit form)
 
-    /// The internal `type` tag (`"anthropic"`, `"openai"`, `"bedrock"`, `"ollama"`).
+    /// The internal `type` tag (`"anthropic"`, `"openai"`, `"openrouter"`,
+    /// `"azure"`, `"google"`, `"bedrock"`, `"ollama"`).
     public var connectorType: String {
         switch self {
         case .anthropic: return "anthropic"
         case .openai: return "openai"
+        case .openrouter: return "openrouter"
+        case .azure: return "azure"
+        case .google: return "google"
         case .bedrock: return "bedrock"
         case .ollama: return "ollama"
         }
@@ -63,18 +108,63 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
 
     public var baseURL: String? {
         switch self {
-        case let .anthropic(b, _, _, _, _), let .openai(b, _, _, _, _): return b
+        case let .anthropic(b, _, _, _, _), let .openai(b, _, _, _, _),
+             let .openrouter(b, _, _, _, _): return b
+        case let .azure(b, _, _, _, _, _, _, _): return b
+        case let .google(b, _, _, _, _, _, _, _, _): return b
         case let .bedrock(_, _, b, _, _, _): return b
         case let .ollama(b, _, _, _, _): return b
         }
     }
 
-    /// Only anthropic/openai carry a credential env-var name.
+    /// Bedrock and Ollama carry no credential env-var name.
     public var apiKeyEnv: String? {
         switch self {
-        case let .anthropic(_, k, _, _, _), let .openai(_, k, _, _, _): return k
+        case let .anthropic(_, k, _, _, _), let .openai(_, k, _, _, _),
+             let .openrouter(_, k, _, _, _): return k
+        case let .azure(_, k, _, _, _, _, _, _): return k
+        case let .google(_, k, _, _, _, _, _, _, _): return k
         default: return nil
         }
+    }
+
+    /// Azure only: `"v1"` (default) or `"classic"`.
+    public var apiSurface: String? {
+        if case let .azure(_, _, s, _, _, _, _, _) = self { return s }
+        return nil
+    }
+
+    /// Azure (`"api_key"` | `"entra"`) or Google (`"vertex"` | `"api_key"`).
+    public var authMode: String? {
+        switch self {
+        case let .azure(_, _, _, a, _, _, _, _): return a
+        case let .google(_, _, _, _, a, _, _, _, _): return a
+        default: return nil
+        }
+    }
+
+    /// Azure only, and only meaningful on the `classic` surface.
+    public var apiVersion: String? {
+        if case let .azure(_, _, _, _, v, _, _, _) = self { return v }
+        return nil
+    }
+
+    /// Google only: the GCP project id (Vertex).
+    public var project: String? {
+        if case let .google(_, _, p, _, _, _, _, _, _) = self { return p }
+        return nil
+    }
+
+    /// Google only: the Vertex region, e.g. `us-central1`.
+    public var location: String? {
+        if case let .google(_, _, _, l, _, _, _, _, _) = self { return l }
+        return nil
+    }
+
+    /// Google only: path to a service-account JSON key (falls back to ADC).
+    public var credentialsPath: String? {
+        if case let .google(_, _, _, _, _, p, _, _, _) = self { return p }
+        return nil
     }
 
     public var awsProfile: String? {
@@ -94,7 +184,10 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
 
     public var connectTimeoutSecs: UInt64? {
         switch self {
-        case let .anthropic(_, _, c, _, _), let .openai(_, _, c, _, _): return c
+        case let .anthropic(_, _, c, _, _), let .openai(_, _, c, _, _),
+             let .openrouter(_, _, c, _, _): return c
+        case let .azure(_, _, _, _, _, c, _, _): return c
+        case let .google(_, _, _, _, _, _, c, _, _): return c
         case let .bedrock(_, _, _, c, _, _): return c
         case let .ollama(_, c, _, _, _): return c
         }
@@ -102,7 +195,10 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
 
     public var streamTimeoutSecs: UInt64? {
         switch self {
-        case let .anthropic(_, _, _, s, _), let .openai(_, _, _, s, _): return s
+        case let .anthropic(_, _, _, s, _), let .openai(_, _, _, s, _),
+             let .openrouter(_, _, _, s, _): return s
+        case let .azure(_, _, _, _, _, _, s, _): return s
+        case let .google(_, _, _, _, _, _, _, s, _): return s
         case let .bedrock(_, _, _, _, s, _): return s
         case let .ollama(_, _, s, _, _): return s
         }
@@ -110,7 +206,10 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
 
     public var maxContextTokens: UInt64? {
         switch self {
-        case let .anthropic(_, _, _, _, m), let .openai(_, _, _, _, m): return m
+        case let .anthropic(_, _, _, _, m), let .openai(_, _, _, _, m),
+             let .openrouter(_, _, _, _, m): return m
+        case let .azure(_, _, _, _, _, _, _, m): return m
+        case let .google(_, _, _, _, _, _, _, _, m): return m
         case let .bedrock(_, _, _, _, _, m): return m
         case let .ollama(_, _, _, _, m): return m
         }
@@ -123,9 +222,29 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
         try c.encode(connectorType, forKey: .type)
         switch self {
         case let .anthropic(baseURL, apiKeyEnv, connectT, streamT, maxTokens),
-             let .openai(baseURL, apiKeyEnv, connectT, streamT, maxTokens):
+             let .openai(baseURL, apiKeyEnv, connectT, streamT, maxTokens),
+             let .openrouter(baseURL, apiKeyEnv, connectT, streamT, maxTokens):
             try c.encodeIfPresent(baseURL, forKey: .baseURL)
             try c.encodeIfPresent(apiKeyEnv, forKey: .apiKeyEnv)
+            try c.encodeIfPresent(connectT, forKey: .connectTimeoutSecs)
+            try c.encodeIfPresent(streamT, forKey: .streamTimeoutSecs)
+            try c.encodeIfPresent(maxTokens, forKey: .maxContextTokens)
+        case let .azure(baseURL, apiKeyEnv, apiSurface, authMode, apiVersion, connectT, streamT, maxTokens):
+            try c.encodeIfPresent(baseURL, forKey: .baseURL)
+            try c.encodeIfPresent(apiKeyEnv, forKey: .apiKeyEnv)
+            try c.encodeIfPresent(apiSurface, forKey: .apiSurface)
+            try c.encodeIfPresent(authMode, forKey: .authMode)
+            try c.encodeIfPresent(apiVersion, forKey: .apiVersion)
+            try c.encodeIfPresent(connectT, forKey: .connectTimeoutSecs)
+            try c.encodeIfPresent(streamT, forKey: .streamTimeoutSecs)
+            try c.encodeIfPresent(maxTokens, forKey: .maxContextTokens)
+        case let .google(baseURL, apiKeyEnv, project, location, authMode, credentialsPath, connectT, streamT, maxTokens):
+            try c.encodeIfPresent(baseURL, forKey: .baseURL)
+            try c.encodeIfPresent(apiKeyEnv, forKey: .apiKeyEnv)
+            try c.encodeIfPresent(project, forKey: .project)
+            try c.encodeIfPresent(location, forKey: .location)
+            try c.encodeIfPresent(authMode, forKey: .authMode)
+            try c.encodeIfPresent(credentialsPath, forKey: .credentialsPath)
             try c.encodeIfPresent(connectT, forKey: .connectTimeoutSecs)
             try c.encodeIfPresent(streamT, forKey: .streamTimeoutSecs)
             try c.encodeIfPresent(maxTokens, forKey: .maxContextTokens)
@@ -158,6 +277,27 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
             self = .anthropic(baseURL: baseURL, apiKeyEnv: apiKeyEnv, connectTimeoutSecs: connectT, streamTimeoutSecs: streamT, maxContextTokens: maxTokens)
         case "openai":
             self = .openai(baseURL: baseURL, apiKeyEnv: apiKeyEnv, connectTimeoutSecs: connectT, streamTimeoutSecs: streamT, maxContextTokens: maxTokens)
+        case "openrouter":
+            self = .openrouter(baseURL: baseURL, apiKeyEnv: apiKeyEnv, connectTimeoutSecs: connectT, streamTimeoutSecs: streamT, maxContextTokens: maxTokens)
+        case "azure":
+            self = .azure(
+                baseURL: baseURL,
+                apiKeyEnv: apiKeyEnv,
+                apiSurface: try c.decodeIfPresent(String.self, forKey: .apiSurface),
+                authMode: try c.decodeIfPresent(String.self, forKey: .authMode),
+                apiVersion: try c.decodeIfPresent(String.self, forKey: .apiVersion),
+                connectTimeoutSecs: connectT, streamTimeoutSecs: streamT, maxContextTokens: maxTokens
+            )
+        case "google":
+            self = .google(
+                baseURL: baseURL,
+                apiKeyEnv: apiKeyEnv,
+                project: try c.decodeIfPresent(String.self, forKey: .project),
+                location: try c.decodeIfPresent(String.self, forKey: .location),
+                authMode: try c.decodeIfPresent(String.self, forKey: .authMode),
+                credentialsPath: try c.decodeIfPresent(String.self, forKey: .credentialsPath),
+                connectTimeoutSecs: connectT, streamTimeoutSecs: streamT, maxContextTokens: maxTokens
+            )
         case "bedrock":
             let awsProfile = try c.decodeIfPresent(String.self, forKey: .awsProfile)
             let region = try c.decodeIfPresent(String.self, forKey: .region)
@@ -173,8 +313,69 @@ public enum ConnectionConfigInput: Codable, Equatable, Hashable, Sendable {
         }
     }
 
-    /// The four connector types, in display order.
-    public static let allConnectorTypes = ["anthropic", "openai", "bedrock", "ollama"]
+    // MARK: Connector-type metadata (picker labels, documented defaults)
+
+    /// Every connector type this client can create, in display order (matches
+    /// the api-model `ConnectionConfigView` variant order).
+    public static let allConnectorTypes = [
+        "anthropic", "openai", "openrouter", "azure", "google", "bedrock", "ollama",
+    ]
+
+    /// Allowed values for Azure's `api_surface`: the v1 GA API, or the legacy
+    /// `deployments/{name}` path that still needs an `api_version`.
+    public static let azureApiSurfaces = ["v1", "classic"]
+    public static let defaultAzureApiSurface = "v1"
+
+    /// Allowed values for Azure's `auth_mode`: an api key, or Entra ID /
+    /// managed identity (ambient token, no key needed).
+    public static let azureAuthModes = ["api_key", "entra"]
+    public static let defaultAzureAuthMode = "api_key"
+
+    /// Allowed values for Google's `auth_mode`: Vertex AI (OAuth2 / ADC or a
+    /// service account) or the AI Studio Gemini API (api key).
+    public static let googleAuthModes = ["vertex", "api_key"]
+    public static let defaultGoogleAuthMode = "vertex"
+
+    /// Human-friendly picker label for a connector type.
+    public static func displayName(for type: String) -> String {
+        switch type {
+        case "anthropic": return "Anthropic"
+        case "openai": return "OpenAI"
+        case "openrouter": return "OpenRouter"
+        case "azure": return "Azure OpenAI"
+        case "google": return "Google (Vertex AI / Gemini)"
+        case "bedrock": return "AWS Bedrock"
+        case "ollama": return "Ollama"
+        default: return type.capitalized
+        }
+    }
+
+    /// The connector's documented default endpoint, shown as a placeholder.
+    /// `nil` where there is no sensible default: Azure's endpoint is
+    /// resource-specific and required, and Google composes the Vertex host from
+    /// `location`.
+    public static func defaultBaseURL(for type: String) -> String? {
+        switch type {
+        case "anthropic": return "https://api.anthropic.com"
+        case "openai": return "https://api.openai.com/v1"
+        case "openrouter": return "https://openrouter.ai/api/v1"
+        case "ollama": return "http://localhost:11434"
+        default: return nil
+        }
+    }
+
+    /// The connector's documented default credential env-var name, shown as a
+    /// placeholder. `nil` for connectors that authenticate ambiently.
+    public static func defaultApiKeyEnv(for type: String) -> String? {
+        switch type {
+        case "anthropic": return "ANTHROPIC_API_KEY"
+        case "openai": return "OPENAI_API_KEY"
+        case "openrouter": return "OPENROUTER_API_KEY"
+        case "azure": return "AZURE_OPENAI_API_KEY"
+        case "google": return "GOOGLE_API_KEY"
+        default: return nil
+        }
+    }
 }
 
 // MARK: - Connection command builders (issue #11)
