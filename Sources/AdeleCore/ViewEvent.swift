@@ -255,13 +255,19 @@ public enum ViewEvent: Decodable, Sendable {
     /// local notice. `kind` is the same presentation metadata a reloaded
     /// message carries, so the live path badges from metadata too.
     case inlineNote(text: String, kind: MessageKind)
+    /// This client's compiled-in ("built-in") MCP servers and their status under
+    /// the `client-mcp.toml` surface named by `surface` — the reply to
+    /// `requestMcpBuiltins`, and re-emitted after a built-in is toggled.
+    /// `servers` is empty on a core built with no MCP servers linked in, which is
+    /// the honest answer rather than a missing one.
+    case mcpBuiltins(surface: String, servers: [McpBuiltinServer])
     /// Any event not yet typed (scratchpad, voice, …).
     case unknown(type: String)
 
     private enum Keys: String, CodingKey {
         case type, label, message, text, value, items, detail, usage, content
         case selection, model, task, id, entry, entries, notes, level, kind
-        case messages, editing
+        case messages, editing, surface, servers
         case progressHint = "progress_hint"
     }
 
@@ -349,6 +355,11 @@ public enum ViewEvent: Decodable, Sendable {
             self = .inlineNote(
                 text: try c.decode(String.self, forKey: .text),
                 kind: (try? c.decode(MessageKind.self, forKey: .kind)) ?? .normal
+            )
+        case "mcp_builtins":
+            self = .mcpBuiltins(
+                surface: try c.decode(String.self, forKey: .surface),
+                servers: try c.decode([McpBuiltinServer].self, forKey: .servers)
             )
         default:
             self = .unknown(type: type)

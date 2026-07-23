@@ -38,6 +38,13 @@ public final class AdeleCore: @unchecked Sendable {
     /// main actor (both `sendCommand` and the reply in `dispatch` run there).
     private var pendingCommands: [String: CheckedContinuation<Data, Error>] = [:]
 
+    /// Callers awaiting the next built-in MCP inventory. Not keyed by request id:
+    /// the core's `mcp_builtins` event carries no correlation id because it is
+    /// also emitted unsolicited (after a toggle), and the inventory is whole-set
+    /// state rather than a per-request answer — so the next one to arrive is the
+    /// right answer for everyone waiting. Main-actor only, like `pendingCommands`.
+    private var pendingBuiltins: [CheckedContinuation<[McpBuiltinServer], Never>] = []
+
     public init() {
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         handle = adele_core_new({ userData, json in
@@ -75,6 +82,14 @@ public final class AdeleCore: @unchecked Sendable {
                     return
                 }
                 if let event = try? JSONDecoder().decode(ViewEvent.self, from: data) {
+                    // The built-in inventory resolves anyone awaiting it AND is
+                    // still forwarded, so an unsolicited refresh (the core emits
+                    // one after a toggle) reaches the UI either way.
+                    if case .mcpBuiltins(_, let servers) = event, !self.pendingBuiltins.isEmpty {
+                        let waiting = self.pendingBuiltins
+                        self.pendingBuiltins.removeAll()
+                        for continuation in waiting { continuation.resume(returning: servers) }
+                    }
                     self.onEvent?(event)
                 }
             }
@@ -138,6 +153,51 @@ public final class AdeleCore: @unchecked Sendable {
     public func setMcpSurface(_ surface: String) {
         guard let handle else { return }
         adele_core_set_mcp_surface(handle, surface)
+    }
+
+    /// The MCP servers compiled into the core and hosted in-process, with each
+    /// one's status under this client's surface: its namespace and live tool
+    /// count, the same-name external server shadowing it (if any), and whether
+    /// this surface has opted out of it.
+    ///
+    /// Answerable with no connection — which servers are built in is decided when
+    /// the core is built (`just build-with-mcp`), and the opt-out is a local file
+    /// — so a settings panel can call this before the first connect. A core built
+    /// with no MCP servers linked in answers with an empty array, which is the
+    /// honest "none compiled in".
+    @MainActor
+    public func mcpBuiltinServers() async -> [McpBuiltinServer] {
+        guard let handle else { return [] }
+        return await withCheckedContinuation { continuation in
+            pendingBuiltins.append(continuation)
+            adele_core_request_mcp_builtins(handle)
+        }
+    }
+
+    /// Turn one built-in MCP server off or back on **for this client's surface**,
+    /// returning the refreshed inventory once the core has written it.
+    ///
+    /// The core owns the write: `client-mcp.toml` is machine-wide and every Adele
+    /// client on the box reads the same file, so a second writer here would be a
+    /// correctness hazard for all of them. Only this client's surface section is
+    /// touched.
+    ///
+    /// The change takes effect on the next connect — a running MCP host is fixed
+    /// at start — but the returned inventory already reflects it, so the panel can
+    /// show the pending state rather than looking unchanged. A failed write comes
+    /// back as a `toast` event plus an inventory that still shows the truth on
+    /// disk.
+    @MainActor
+    @discardableResult
+    public func setMcpBuiltinDisabled(name: String, disabled: Bool) async -> [McpBuiltinServer] {
+        guard let handle else { return [] }
+        return await withCheckedContinuation { continuation in
+            // No separate read request: the core emits a fresh inventory of its
+            // own accord once the write lands, so awaiting that one avoids racing
+            // a concurrent read against the write.
+            pendingBuiltins.append(continuation)
+            adele_core_set_mcp_builtin_disabled(handle, name, disabled)
+        }
     }
 
     public func sendPrompt(_ text: String) {

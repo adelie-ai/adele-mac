@@ -12,14 +12,13 @@ import Foundation
 // sibling clients today; the tests assert the shared behaviour literally
 // (reason strings, sort order, chip text) so the two stay in step.
 //
-// Scope note (adele-mac#3): adele-mac surfaces only what the core/daemon expose.
-// It hosts no in-process MCP servers of its own — the ffi cdylib it links
-// depends on no `*-mcp` crate and starts its client MCP host with
-// `McpHost::start` (never `start_with`), so there are no built-ins to enumerate
-// and no client-server inventory on the FFI surface. The built-in and
-// client-run populations are therefore modelled here in full (so the panel
-// renders them correctly the moment a source exists) but are fed empty until
-// the core exposes them. See `McpInventory` in the app target for that seam.
+// Scope note: adele-mac surfaces only what the core/daemon expose. It hosts no
+// MCP servers of its own — the built-in population is compiled into the shared
+// Rust core (`just build-with-mcp`) and hosted there in-process, and the core
+// reports it over the FFI along with each server's per-surface status
+// (adele-mac#12). The EXTERNAL client-run population is still not on the FFI
+// surface, so it is modelled here in full but fed empty. See `McpInventory` in
+// the app target for both seams.
 
 /// Where an MCP server actually runs. The panel groups and filters by this, and
 /// it drives the [`mcpRunnerLabel`] chip.
@@ -99,9 +98,13 @@ public struct McpClientServer: Sendable, Hashable {
     }
 }
 
-/// One MCP server compiled into the client and hosted in-process. Mirrors the
-/// core's `BuiltinServerDto`.
-public struct McpBuiltinServer: Sendable, Hashable {
+/// One MCP server compiled into the client and hosted in-process.
+///
+/// Decoded straight from the core's `BuiltinServerDto` as it arrives on the
+/// `mcp_builtins` view event, so the panel model and the wire shape cannot drift
+/// apart. The DTO's constant `kind` field is deliberately not modelled: a value
+/// that arrives through this type is a built-in by construction.
+public struct McpBuiltinServer: Sendable, Hashable, Decodable {
     /// Server name — also the key an external client-run server of the same name
     /// overrides.
     public let name: String
@@ -128,6 +131,13 @@ public struct McpBuiltinServer: Sendable, Hashable {
         self.toolCount = toolCount
         self.overriddenBy = overriddenBy
         self.disabledByConfig = disabledByConfig
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, namespace
+        case toolCount = "tool_count"
+        case overriddenBy = "overridden_by"
+        case disabledByConfig = "disabled_by_config"
     }
 }
 
@@ -387,23 +397,61 @@ public struct McpRowActions: Sendable, Hashable {
     public let help: String?
 }
 
+/// The on/off presentation of a built-in's enable control, decided purely from
+/// the built-in itself so it is testable without a view. A Swift port of gtk's
+/// `builtin_toggle_state`, so the two clients present the same switch.
+public struct McpBuiltinToggleState: Sendable, Hashable {
+    /// The control reads on when the built-in is enabled in this client's config
+    /// — i.e. NOT named in the surface's opt-out list.
+    public let isOn: Bool
+    /// The control is usable unless the built-in is disabled *only* because a
+    /// same-name external server overrides it: that override wins whatever the
+    /// switch says, so offering it would promise something it cannot deliver. An
+    /// opted-out built-in stays usable so it can be turned back on, even when it
+    /// is also overridden.
+    public let isInteractive: Bool
+}
+
+/// Decide a built-in's enable control from its state: on iff enabled in config;
+/// usable unless it is disabled only by an external override.
+public func mcpBuiltinToggleState(_ builtin: McpBuiltinServer) -> McpBuiltinToggleState {
+    McpBuiltinToggleState(
+        isOn: !builtin.disabledByConfig,
+        isInteractive: builtin.disabledByConfig || builtin.overriddenBy == nil
+    )
+}
+
 /// The controls a row offers.
 ///
-/// adele-mac administers only the daemon fleet: client-run and built-in servers
-/// are owned by the shared core (the machine-local `client-mcp.toml` and the
-/// core's in-process host), which exposes no write path over the FFI. Their rows
-/// are therefore read-only and say why, rather than offering a control that
-/// silently does nothing. A disabled built-in explains itself with the row's own
-/// reason (shadowed, or turned off in config).
-public func mcpRowActions(for row: McpServerRow) -> McpRowActions {
+/// The three populations differ in who owns them:
+///
+/// - **Daemon** rows are administered through the daemon's command surface —
+///   toggle, remove, and the add form.
+/// - **Built-in** rows are compiled into the client core, which owns the
+///   per-surface opt-out and exposes it over the FFI, so they toggle (subject to
+///   ``mcpBuiltinToggleState``) but can never be removed. Pass the source
+///   `builtin` — the row alone doesn't carry the override/opt-out split the
+///   control's usability turns on; without it the control stays inert rather
+///   than writing a state that cannot be determined.
+/// - **External client-run** rows are definitions in the machine-wide
+///   `client-mcp.toml`, which this panel does not administer, so they are
+///   read-only and say why rather than offering a control that does nothing.
+///
+/// A disabled built-in explains itself with the row's own reason (shadowed, or
+/// turned off in config).
+public func mcpRowActions(
+    for row: McpServerRow,
+    builtin: McpBuiltinServer? = nil
+) -> McpRowActions {
     switch mcpBackend(for: row.runner) {
     case .daemon:
         return McpRowActions(canToggle: true, canRemove: true, help: nil)
+    case .client where row.kind == .builtIn:
+        let help = row.disabledReason ?? "Built into the client core and hosted in-process."
+        let canToggle = builtin.map { mcpBuiltinToggleState($0).isInteractive } ?? false
+        return McpRowActions(canToggle: canToggle, canRemove: false, help: help)
     case .client:
-        let help = row.disabledReason
-            ?? (row.kind == .builtIn
-                ? "Built into the client core and hosted in-process."
-                : "Run by this client from the machine's client-mcp.toml.")
+        let help = row.disabledReason ?? "Run by this client from the machine's client-mcp.toml."
         return McpRowActions(canToggle: false, canRemove: false, help: help)
     }
 }

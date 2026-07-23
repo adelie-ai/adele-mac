@@ -693,6 +693,13 @@ final class AppModel {
                 DisplayMessage(id: freshID(), role: "note", content: text, kind: kind)
             )
 
+        case .mcpBuiltins:
+            // The MCP settings panel asks for (and awaits) this inventory
+            // directly through `AdeleCore`, so the model holds no copy: a stale
+            // one would be a second source of truth for a panel that is only ever
+            // open in one place.
+            break
+
         case .unknown:
             break
         }

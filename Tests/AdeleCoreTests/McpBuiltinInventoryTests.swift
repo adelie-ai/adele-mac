@@ -44,7 +44,11 @@ import Testing
 
     /// Run `body` with the core's config lookup redirected into a fresh temp
     /// directory, restoring the previous `XDG_CONFIG_HOME` afterwards.
-    private func withConfigHome(
+    ///
+    /// Main-actor isolated so `body` stays in the tests' own isolation domain —
+    /// it drives a main-actor `AdeleCore`, and hopping domains would make the
+    /// closure a `sending` value.
+    @MainActor private func withConfigHome(
         seed: String? = nil,
         _ body: (ConfigHome) async throws -> Void
     ) async throws {
