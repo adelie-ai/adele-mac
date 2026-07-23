@@ -13,7 +13,10 @@ private enum EditorTarget: Identifiable {
 }
 
 /// Knowledge-base browser/editor, presented as a sheet. Lists and searches
-/// entries over the management bridge; add/edit/delete via the editor sheet.
+/// entries over the management bridge; add/edit/delete via the editor sheet;
+/// on-demand maintenance passes via the toolbar's Maintenance menu (tracked in
+/// the tasks panel, not here). The list refetches itself on `knowledge_changed`,
+/// so a maintenance pass — or an edit made from another client — lands live.
 struct KnowledgeView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -55,6 +58,10 @@ struct KnowledgeView: View {
                     Button { editor = .new } label: { Image(systemName: "plus") }
                         .help("New entry")
                 }
+                ToolbarItem(placement: .automatic) {
+                    KnowledgeMaintenanceMenu()
+                        .environment(model)
+                }
             }
         }
         .frame(width: 580, height: 540)
@@ -62,6 +69,9 @@ struct KnowledgeView: View {
             KnowledgeEditor(target: target)
                 .environment(model)
         }
+        // `model.showKnowledge` (this sheet's presentation binding) is what gates
+        // the debounced `knowledge_changed` refetch, so nothing extra is needed
+        // here to keep the list live.
         .task { model.loadKnowledge() }
     }
 }
@@ -74,17 +84,7 @@ private struct KnowledgeRow: View {
             Text(entry.content)
                 .lineLimit(3)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if !entry.tags.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(entry.tags, id: \.self) { tag in
-                        Text(tag)
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
-                    }
-                }
-            }
+            KnowledgeTagChips(entry: entry)
         }
         .padding(.vertical, 3)
     }
@@ -96,7 +96,10 @@ private struct KnowledgeEditor: View {
     let target: EditorTarget
 
     @State private var content = ""
-    @State private var tagsText = ""
+    // Tags are edited one level at a time (kind vs facet) and rejoined —
+    // normalized — on save.
+    @State private var kindsText = ""
+    @State private var facetsText = ""
 
     private var existingID: String? {
         if case .existing(let entry) = target { return entry.id }
@@ -111,8 +114,7 @@ private struct KnowledgeEditor: View {
                 .font(.body)
                 .frame(minHeight: 180)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
-            TextField("Tags (comma-separated)", text: $tagsText)
-                .textFieldStyle(.roundedBorder)
+            KnowledgeTagFields(kindsText: $kindsText, facetsText: $facetsText)
             HStack {
                 if let id = existingID {
                     Button("Delete", role: .destructive) {
@@ -131,19 +133,16 @@ private struct KnowledgeEditor: View {
             }
         }
         .padding(16)
-        .frame(width: 480, height: 360)
+        .frame(width: 480, height: 380)
         .onAppear {
             if case .existing(let entry) = target {
                 content = entry.content
-                tagsText = entry.tags.joined(separator: ", ")
+                (kindsText, facetsText) = entry.tagFields
             }
         }
     }
 
     private var parsedTags: [String] {
-        tagsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
+        KnowledgeTag.combine(kinds: kindsText, facets: facetsText)
     }
 }

@@ -127,11 +127,16 @@ final class AppModel {
     var settingsError: String?
     var settingsLoading = false
 
-    // Knowledge base
+    // Knowledge base (intents + event handling live in AppModel+Knowledge.swift)
     var knowledgeEntries: [KnowledgeEntry] = []
     var knowledgeSearch = ""
     var showKnowledge = false
     var knowledgeLoading = false
+    /// Debounce token for `knowledge_changed`-driven refetches.
+    var knowledgeRefreshTask: Task<Void, Never>?
+    /// Background-task ids of maintenance runs we started, so their completion
+    /// can refresh the browser.
+    var knowledgeMaintenanceTaskIDs: Set<String> = []
 
     init() {
         core.onEvent = { [weak self] event in
@@ -615,12 +620,16 @@ final class AppModel {
             if let idx = tasks.firstIndex(where: { $0.id == id }), tasks[idx].isActive {
                 tasks[idx].status = "completed"
             }
+            knowledgeMaintenanceTaskCompleted(id)
 
         case .taskLogs(let id, let entries):
             taskLogs[id] = entries
 
         case .scratchpad(let notes):
             scratchpad = notes
+
+        case .knowledgeChanged:
+            knowledgeChanged()
 
         case .addUserMessage(let content):
             // Exactly one bubble per send (#8): the core emits this once per
@@ -668,7 +677,7 @@ final class AppModel {
         }
     }
 
-    private func showToast(_ text: String) {
+    func showToast(_ text: String) {
         toast = text
         toastTask?.cancel()
         toastTask = Task { [weak self] in

@@ -96,6 +96,17 @@ public struct KnowledgeEntry: Decodable, Identifiable, Hashable, Sendable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        content = try c.decode(String.self, forKey: .content)
+        // `tags` is always sent by current daemons; tolerate its absence so an
+        // older/leaner shape decodes to an untagged entry instead of throwing.
+        tags = (try? c.decode([String].self, forKey: .tags)) ?? []
+        createdAt = try c.decode(String.self, forKey: .createdAt)
+        updatedAt = try c.decode(String.self, forKey: .updatedAt)
+    }
 }
 
 // MARK: - Typed management commands over the generic bridge
