@@ -308,11 +308,12 @@ import Foundation
         #expect(mcpBackend(for: .client) == .client)
     }
 
-    @Test func daemonRowsAreEditableAndClientAndBuiltinRowsAreNot() throws {
+    @Test func daemonRowsAreEditableAndExternalClientRowsAreNot() throws {
+        let disabledBuiltin = builtin("web", disabledByConfig: true)
         let rows = mcpServerRows(
             daemon: [try daemonView("alpha")],
             client: [clientServer("beta")],
-            builtins: [builtin("web", disabledByConfig: true)]
+            builtins: [disabledBuiltin]
         )
         let byName = Dictionary(uniqueKeysWithValues: rows.map { ($0.name, $0) })
 
@@ -321,21 +322,71 @@ import Foundation
         #expect(daemonActions.canRemove)
         #expect(daemonActions.help == nil)
 
-        // adele-mac administers only the daemon fleet: client-run and built-in
-        // servers are owned by the shared core, so their rows are read-only and
-        // must say why rather than offering a control that does nothing.
+        // An EXTERNAL client-run server is defined in the machine-wide
+        // client-mcp.toml and this panel does not administer definitions, so its
+        // row stays read-only and must say why rather than offering a control
+        // that does nothing.
         let clientActions = mcpRowActions(for: try #require(byName["beta"]))
         #expect(!clientActions.canToggle)
         #expect(!clientActions.canRemove)
         #expect(clientActions.help != nil)
 
-        let builtinActions = mcpRowActions(for: try #require(byName["web"]))
-        #expect(!builtinActions.canToggle)
-        #expect(!builtinActions.canRemove)
+        // A built-in IS administrable now (adele-mac#12): the core writes this
+        // surface's opt-out. It still can't be removed — it is compiled in.
+        let builtinRow = try #require(byName["web"])
+        let builtinActions = mcpRowActions(for: builtinRow, builtin: disabledBuiltin)
+        #expect(builtinActions.canToggle, "a config-disabled built-in can be turned back on")
+        #expect(!builtinActions.canRemove, "a compiled-in server cannot be removed")
         #expect(
             builtinActions.help == "disabled in this client's config",
             "a disabled built-in explains itself with the row's reason"
         )
+    }
+
+    /// Defensive: without the source built-in the row's toggle is inert rather
+    /// than offering a write whose target state cannot be determined.
+    @Test func builtinRowWithoutItsSourceIsNotToggleable() throws {
+        let rows = mcpServerRows(daemon: [], client: [], builtins: [builtin("web")])
+        let actions = mcpRowActions(for: try #require(rows.first))
+        #expect(!actions.canToggle)
+        #expect(!actions.canRemove)
+    }
+
+    // MARK: the built-in enable/disable toggle (scope item 3)
+
+    /// An active built-in reads on and is interactive — turning it off writes
+    /// this surface's opt-out.
+    @Test func activeBuiltinToggleIsOnAndInteractive() {
+        let state = mcpBuiltinToggleState(builtin("web"))
+        #expect(state.isOn)
+        #expect(state.isInteractive)
+    }
+
+    /// A built-in the user turned off reads off but stays interactive, or they
+    /// could never turn it back on.
+    @Test func configDisabledBuiltinToggleIsOffAndInteractive() {
+        let state = mcpBuiltinToggleState(builtin("web", disabledByConfig: true))
+        #expect(!state.isOn)
+        #expect(state.isInteractive)
+    }
+
+    /// A built-in shadowed only by a same-name external server reads on — it *is*
+    /// enabled in config — but is inert: the override wins regardless, so a
+    /// toggle here would promise something it cannot deliver.
+    @Test func overriddenOnlyBuiltinToggleIsOnButInert() {
+        let state = mcpBuiltinToggleState(builtin("web", overriddenBy: "web"))
+        #expect(state.isOn)
+        #expect(!state.isInteractive)
+    }
+
+    /// Both reasons at once: the explicit opt-out is the user's own choice, so it
+    /// wins the display and the control stays usable.
+    @Test func configDisabledAndOverriddenBuiltinStaysInteractive() {
+        let state = mcpBuiltinToggleState(
+            builtin("web", overriddenBy: "web", disabledByConfig: true)
+        )
+        #expect(!state.isOn)
+        #expect(state.isInteractive)
     }
 
     // MARK: per-namespace tool counts (scope item 5)

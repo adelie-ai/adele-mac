@@ -137,6 +137,40 @@ import Foundation
         #expect(type == "some_future_event")
     }
 
+    /// The core's built-in MCP inventory (adele-mac#12). Decoded literally: these
+    /// field names are the ABI, and a mismatch would blank the panel's built-in
+    /// rows rather than fail loudly.
+    @Test func mcpBuiltins() throws {
+        let json = """
+            {"type":"mcp_builtins","surface":"mac","servers":[\
+            {"name":"fileio","namespace":"fileio","kind":"built_in","tool_count":9,\
+            "overridden_by":null,"disabled_by_config":false},\
+            {"name":"web","namespace":"web","kind":"built_in","tool_count":3,\
+            "overridden_by":"web","disabled_by_config":true}]}
+            """
+        guard case .mcpBuiltins(let surface, let servers) = try decode(json) else {
+            Issue.record("expected .mcpBuiltins"); return
+        }
+        #expect(surface == "mac", "the core echoes which surface it resolved")
+        #expect(servers.count == 2)
+        #expect(servers[0] == McpBuiltinServer(name: "fileio", namespace: "fileio", toolCount: 9))
+        #expect(servers[1].overriddenBy == "web")
+        #expect(servers[1].disabledByConfig)
+    }
+
+    /// A core built with no `mcp-*` feature answers with an empty list — the
+    /// honest "none linked in", which must decode rather than be treated as
+    /// malformed.
+    @Test func mcpBuiltinsEmpty() throws {
+        guard case .mcpBuiltins(let surface, let servers) =
+            try decode(#"{"type":"mcp_builtins","surface":"kde","servers":[]}"#)
+        else {
+            Issue.record("expected .mcpBuiltins"); return
+        }
+        #expect(surface == "kde")
+        #expect(servers.isEmpty)
+    }
+
     @Test func scratchpadNoteDefaults() throws {
         let json = """
         {"type":"scratchpad","notes":[{"id":"n1","key":"k","content":"c","updated_at":"2026"}]}
