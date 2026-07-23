@@ -60,8 +60,7 @@ private struct PurposeRow: View {
     let kind: String
 
     private var currentLabel: String {
-        guard let config = model.purpose(for: kind) else { return "Default" }
-        return config.model
+        PurposeWrite.displayLabel(for: model.purpose(for: kind))
     }
 
     var body: some View {
@@ -86,6 +85,10 @@ private struct PurposeRow: View {
                 Text(currentLabel).foregroundStyle(.secondary)
             }
             .fixedSize()
+            // A row whose model list is unavailable must not be writable at all
+            // (adele-gtk#142): with no listings there is nothing this UI could
+            // honestly bind, and the only thing left to pick would be a
+            // sentinel the user never chose.
             .disabled(model.models.isEmpty)
         }
     }

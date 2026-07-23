@@ -68,10 +68,35 @@ public struct ConnectionView: Decodable, Identifiable, Hashable, Sendable {
 
 public struct PurposeConfigView: Decodable, Hashable, Sendable {
     /// A connection id, or the literal "primary" (inherit from interactive).
+    /// Only meaningful as "inherit" when `model` carries it too — see
+    /// `PurposeWrite`.
     public let connection: String
     /// A model id, or the literal "primary".
     public let model: String
+    /// "low" | "medium" | "high" | nil.
     public let effort: String?
+    /// Per-purpose override of the model's context window in tokens
+    /// (desktop-assistant#51). This client does not edit it, but `SetPurpose`
+    /// is a full replace, so it must be read back and sent unchanged or a menu
+    /// pick here silently wipes an override set from the TUI or config file.
+    public let maxContextTokens: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case connection, model, effort
+        case maxContextTokens = "max_context_tokens"
+    }
+
+    public init(
+        connection: String,
+        model: String,
+        effort: String? = nil,
+        maxContextTokens: UInt64? = nil
+    ) {
+        self.connection = connection
+        self.model = model
+        self.effort = effort
+        self.maxContextTokens = maxContextTokens
+    }
 }
 
 public struct PurposesView: Decodable, Hashable, Sendable {
@@ -80,6 +105,7 @@ public struct PurposesView: Decodable, Hashable, Sendable {
     public var consolidation: PurposeConfigView?
     public var embedding: PurposeConfigView?
     public var titling: PurposeConfigView?
+    public var voice: PurposeConfigView?
     public init() {}
 }
 
@@ -133,17 +159,29 @@ extension AdeleCore {
     }
 
     /// Assign a purpose to a connection+model (effort optional). `purpose` is one
-    /// of `purposeKinds`; "primary" in connection/model inherits from interactive.
+    /// of `purposeKinds`; "primary" in connection/model inherits from interactive
+    /// — and is only valid when *both* carry it (see `PurposeWrite`).
     @MainActor
     public func setPurpose(
         _ purpose: String,
         connection: String,
         model: String,
-        effort: String? = nil
+        effort: String? = nil,
+        maxContextTokens: UInt64? = nil
     ) async throws {
         _ = try await sendCommand(AdeleCommand.setPurpose(
-            purpose, connection: connection, model: model, effort: effort
+            purpose,
+            connection: connection,
+            model: model,
+            effort: effort,
+            maxContextTokens: maxContextTokens
         ))  // CommandResult::Ack, or throws
+    }
+
+    /// Send a whole binding — normally the one `PurposeWrite.planned` approved.
+    @MainActor
+    public func setPurpose(_ purpose: String, config: PurposeConfigView) async throws {
+        _ = try await sendCommand(AdeleCommand.setPurpose(purpose, config: config))
     }
 }
 

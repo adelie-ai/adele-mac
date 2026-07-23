@@ -24,23 +24,45 @@ public enum AdeleCommand {
 
     // MARK: Purposes
 
+    /// `SetPurpose` is a full replace of the purpose's config, so every field
+    /// the caller knows about must be supplied — omitting `max_context_tokens`
+    /// clears a per-purpose context-window override (desktop-assistant#51) set
+    /// elsewhere. Prefer the `PurposeConfigView` overload, which carries them.
     public static func setPurpose(
         _ purpose: String,
         connection: String,
         model: String,
-        effort: String? = nil
+        effort: String? = nil,
+        maxContextTokens: UInt64? = nil
     ) -> String {
         struct Config: Encodable {
             let connection: String
             let model: String
             let effort: String?
+            let max_context_tokens: UInt64?
         }
         struct Payload: Encodable { let purpose: String; let config: Config }
         struct Cmd: Encodable { let set_purpose: Payload }
         return encode(Cmd(set_purpose: Payload(
             purpose: purpose,
-            config: Config(connection: connection, model: model, effort: effort)
+            config: Config(
+                connection: connection,
+                model: model,
+                effort: effort,
+                max_context_tokens: maxContextTokens
+            )
         )))
+    }
+
+    /// Send a whole binding — normally the one `PurposeWrite.planned` approved.
+    public static func setPurpose(_ purpose: String, config: PurposeConfigView) -> String {
+        setPurpose(
+            purpose,
+            connection: config.connection,
+            model: config.model,
+            effort: config.effort,
+            maxContextTokens: config.maxContextTokens
+        )
     }
 
     // MARK: Knowledge base

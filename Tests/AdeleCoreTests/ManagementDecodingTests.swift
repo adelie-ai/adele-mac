@@ -34,6 +34,34 @@ import Foundation
         #expect(purposes.interactive?.model == "llama3.2:1b")
         #expect(purposes.dreaming == nil)
         #expect(purposes.consolidation == nil)
+        #expect(purposes.voice == nil)
+    }
+
+    /// `voice` is a purpose kind the daemon reports (protocol `PurposeKind`),
+    /// so it has to decode — otherwise the Voice row can never know its own
+    /// server state and the no-op guard could not recognise a reconcile.
+    @Test func purposesViewDecodesVoice() throws {
+        let json = #"{"voice":{"connection":"bedrock","model":"zai.glm-5"}}"#
+        let purposes = try JSONDecoder().decode(PurposesView.self, from: Data(json.utf8))
+        #expect(purposes.voice?.connection == "bedrock")
+        #expect(purposes.voice?.model == "zai.glm-5")
+    }
+
+    /// The per-purpose context-window override (desktop-assistant#51) must
+    /// round-trip: `SetPurpose` is a full replace, so a value this client
+    /// cannot read is a value it will silently clear.
+    @Test func purposeConfigDecodesMaxContextTokens() throws {
+        let json = #"{"connection":"bedrock","model":"zai.glm-5","effort":"high","max_context_tokens":8192}"#
+        let config = try JSONDecoder().decode(PurposeConfigView.self, from: Data(json.utf8))
+        #expect(config.effort == "high")
+        #expect(config.maxContextTokens == 8192)
+    }
+
+    @Test func purposeConfigToleratesAbsentMaxContextTokens() throws {
+        let json = #"{"connection":"bedrock","model":"zai.glm-5"}"#
+        let config = try JSONDecoder().decode(PurposeConfigView.self, from: Data(json.utf8))
+        #expect(config.effort == nil)
+        #expect(config.maxContextTokens == nil)
     }
 
     @Test func knowledgeEntry() throws {
