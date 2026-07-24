@@ -339,9 +339,19 @@ public func mcpEmptyServerListMessage(
     connected: Bool,
     loading: Bool
 ) -> String {
-    // Spec stub: does not yet distinguish "not connected" from "no servers". The
-    // test pins the per-bucket, connection-aware wording the implementation adds.
-    loading ? "Loading…" : "No MCP servers configured."
+    if loading { return "Loading…" }
+    switch filter {
+    case .all:
+        return connected
+            ? "No MCP servers configured."
+            : "No client-run MCP servers configured."
+    case .daemon:
+        return connected
+            ? "The daemon runs no MCP servers."
+            : "Connect to see daemon-run servers."
+    case .client:
+        return "This client runs no MCP servers."
+    }
 }
 
 /// Apply a ``McpRunnerFilter`` to already-built rows, preserving their order.

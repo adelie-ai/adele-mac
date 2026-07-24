@@ -201,9 +201,11 @@ public final class AdeleCore: @unchecked Sendable {
     /// external servers answers with an empty array.
     @MainActor
     public func mcpClientServers() async -> [McpClientServer] {
-        // Spec stub: the FFI read path is not wired yet, so the panel renders no
-        // client-run rows. The tests pin what the implementation must deliver.
-        []
+        guard let handle else { return [] }
+        return await withCheckedContinuation { continuation in
+            pendingClientServers.append(continuation)
+            adele_core_request_mcp_client_servers(handle)
+        }
     }
 
     /// Turn one built-in MCP server off or back on **for this client's surface**,
