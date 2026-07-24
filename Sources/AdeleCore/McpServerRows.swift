@@ -71,12 +71,20 @@ public enum McpServerKind: String, Sendable, Hashable {
 }
 
 /// One client-run (external) MCP server, as the host client resolves it from its
-/// own registry. Mirrors the core's `ClientServerDto`.
-public struct McpClientServer: Sendable, Hashable {
+/// own registry.
+///
+/// Decoded straight from the core's `ClientServerDto` as it arrives on the
+/// `mcp_client_servers` view event, so the panel model and the wire shape cannot
+/// drift apart — the sibling of ``McpBuiltinServer``. Answerable offline: the
+/// server list comes from `client-mcp.toml`, and the live tool count and
+/// running/error status fill in once a connection has started the client MCP
+/// host.
+public struct McpClientServer: Sendable, Hashable, Decodable {
     public let name: String
     /// Transport: `"stdio"` or `"http"`.
     public let transport: String
-    /// Display status string (e.g. `enabled` / `disabled`).
+    /// Display status: `"enabled"` (configured, no host running yet),
+    /// `"running"` (a host serves it), or `"error"` (a host failed to start it).
     public let status: String
     public let toolCount: UInt32
     /// Tool namespace; falls back to ``name`` when unset — the same key the
@@ -95,6 +103,11 @@ public struct McpClientServer: Sendable, Hashable {
         self.status = status
         self.toolCount = toolCount
         self.namespace = namespace
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, transport, status, namespace
+        case toolCount = "tool_count"
     }
 }
 
@@ -309,6 +322,36 @@ public func mcpServerRows(
             return lhs.offset < rhs.offset
         }
         .map(\.element)
+}
+
+/// The message shown when the filtered server list is empty, honest about *why*:
+/// still loading, filtered to a bucket with nothing in it, genuinely nothing
+/// configured, or — for the daemon fleet — simply not connected yet.
+///
+/// The connection only gates the *daemon* population: the client-run and
+/// built-in rows are answerable offline, so a disconnected panel that shows none
+/// of them really has none configured, whereas absent daemon rows while
+/// disconnected are "not connected yet", never "the daemon runs nothing". The
+/// panel renders while disconnected (adele-mac#3), so this must not imply "no
+/// servers" when the truth is "not connected".
+public func mcpEmptyServerListMessage(
+    filter: McpRunnerFilter,
+    connected: Bool,
+    loading: Bool
+) -> String {
+    if loading { return "Loading…" }
+    switch filter {
+    case .all:
+        return connected
+            ? "No MCP servers configured."
+            : "No client-run MCP servers configured."
+    case .daemon:
+        return connected
+            ? "The daemon runs no MCP servers."
+            : "Connect to see daemon-run servers."
+    case .client:
+        return "This client runs no MCP servers."
+    }
 }
 
 /// Apply a ``McpRunnerFilter`` to already-built rows, preserving their order.

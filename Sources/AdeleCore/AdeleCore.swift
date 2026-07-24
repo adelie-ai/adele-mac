@@ -45,6 +45,13 @@ public final class AdeleCore: @unchecked Sendable {
     /// right answer for everyone waiting. Main-actor only, like `pendingCommands`.
     private var pendingBuiltins: [CheckedContinuation<[McpBuiltinServer], Never>] = []
 
+    /// Callers awaiting the next external client-run MCP inventory. Not keyed by
+    /// request id, for the same reason as ``pendingBuiltins``: the core's
+    /// `mcp_client_servers` event carries no correlation id and the inventory is
+    /// whole-set state, so the next one to arrive answers everyone waiting.
+    /// Main-actor only.
+    private var pendingClientServers: [CheckedContinuation<[McpClientServer], Never>] = []
+
     public init() {
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         handle = adele_core_new({ userData, json in
@@ -88,6 +95,13 @@ public final class AdeleCore: @unchecked Sendable {
                     if case .mcpBuiltins(_, let servers) = event, !self.pendingBuiltins.isEmpty {
                         let waiting = self.pendingBuiltins
                         self.pendingBuiltins.removeAll()
+                        for continuation in waiting { continuation.resume(returning: servers) }
+                    }
+                    // Same contract for the external client-run inventory.
+                    if case .mcpClientServers(_, let servers) = event,
+                       !self.pendingClientServers.isEmpty {
+                        let waiting = self.pendingClientServers
+                        self.pendingClientServers.removeAll()
                         for continuation in waiting { continuation.resume(returning: servers) }
                     }
                     self.onEvent?(event)
@@ -171,6 +185,26 @@ public final class AdeleCore: @unchecked Sendable {
         return await withCheckedContinuation { continuation in
             pendingBuiltins.append(continuation)
             adele_core_request_mcp_builtins(handle)
+        }
+    }
+
+    /// The external client-run MCP servers this client hosts on the edge — the
+    /// `client-mcp.toml` servers this client's surface enables — with each one's
+    /// transport, live tool count, and status.
+    ///
+    /// Answerable with no connection, the sibling of ``mcpBuiltinServers()``:
+    /// which external servers this surface hosts is a property of
+    /// `client-mcp.toml`, so a settings panel can call this before the first
+    /// connect. The list is complete offline (each server reports `enabled` with
+    /// a `0` tool count); the live tool counts and running/error status fill in
+    /// once a connection has started the client MCP host. A surface with no
+    /// external servers answers with an empty array.
+    @MainActor
+    public func mcpClientServers() async -> [McpClientServer] {
+        guard let handle else { return [] }
+        return await withCheckedContinuation { continuation in
+            pendingClientServers.append(continuation)
+            adele_core_request_mcp_client_servers(handle)
         }
     }
 

@@ -451,4 +451,38 @@ import Foundation
         #expect(row.kind == .stdio)
         #expect(row.disabledReason == nil)
     }
+
+    // MARK: empty-list gating — "not connected" is not "no servers" (adele-mac#3)
+
+    /// The connection gates only the daemon population. While disconnected the
+    /// panel still renders, so the empty message must not imply the daemon runs
+    /// nothing when the truth is that we simply have not connected yet.
+    @Test func emptyMessageDistinguishesDisconnectedFromEmpty() {
+        // Loading wins regardless of the rest.
+        #expect(
+            mcpEmptyServerListMessage(filter: .all, connected: false, loading: true) == "Loading…"
+        )
+
+        // Disconnected: the daemon bucket says to connect, never "runs nothing".
+        let daemonOffline = mcpEmptyServerListMessage(filter: .daemon, connected: false, loading: false)
+        #expect(daemonOffline == "Connect to see daemon-run servers.")
+        #expect(!daemonOffline.lowercased().contains("no mcp servers"))
+
+        // Connected: the daemon genuinely runs nothing.
+        #expect(
+            mcpEmptyServerListMessage(filter: .daemon, connected: true, loading: false)
+                == "The daemon runs no MCP servers."
+        )
+
+        // The client bucket is answerable offline, so its message never mentions
+        // the connection — an empty client bucket means nothing is configured.
+        let clientOffline = mcpEmptyServerListMessage(filter: .client, connected: false, loading: false)
+        #expect(clientOffline == "This client runs no MCP servers.")
+        #expect(!clientOffline.lowercased().contains("connect"))
+
+        // The "all" bucket, disconnected, scopes its emptiness to the client-run
+        // set it can actually see — it must not claim there are no servers at all.
+        let allOffline = mcpEmptyServerListMessage(filter: .all, connected: false, loading: false)
+        #expect(allOffline == "No client-run MCP servers configured.")
+    }
 }

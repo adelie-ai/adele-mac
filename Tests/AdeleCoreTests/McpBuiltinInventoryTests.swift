@@ -267,6 +267,93 @@ import Testing
         }
     }
 
+    /// `client_run_servers_render_from_live_core` — an external server the mac
+    /// surface enables arrives over the FFI (adele-mac#3) with the fields the
+    /// panel draws and projects into a well-formed client-run row: client runner,
+    /// a transport-derived kind, a resolved namespace, and — offline — an enabled
+    /// status with no live tool count yet.
+    @MainActor @Test func clientRunServersRenderFromLiveCore() async throws {
+        try await withConfigHome(
+            seed: """
+                [[servers]]
+                name = "browser"
+                command = "/usr/bin/browser-mcp"
+                namespace = "web"
+
+                [[servers]]
+                name = "remote"
+                namespace = "rem"
+                [servers.http]
+                url = "https://example.test/mcp"
+
+                [surfaces.mac]
+                enabled = ["browser", "remote"]
+                """
+        ) { _ in
+            let core = macCore()
+            let servers = await core.mcpClientServers()
+
+            let browser = try #require(servers.first { $0.name == "browser" })
+            #expect(browser.transport == "stdio")
+            #expect(browser.status == "enabled", "offline: configured but no host running yet")
+            #expect(browser.toolCount == 0)
+            #expect(browser.namespace == "web")
+
+            // An HTTP endpoint reports the http transport honestly, never a guess.
+            let remote = try #require(servers.first { $0.name == "remote" })
+            #expect(remote.transport == "http")
+
+            let rows = mcpServerRows(daemon: [], client: servers, builtins: [])
+            let row = try #require(rows.first { $0.name == "browser" })
+            #expect(row.runner == .client, "a client-run server is hosted by this client")
+            #expect(row.kind == .stdio)
+            #expect(row.namespace == "web", "the namespace is what tool counts key on")
+            #expect(mcpFilterRows(rows, filter: .client).count == rows.count)
+            #expect(mcpFilterRows(rows, filter: .daemon).isEmpty)
+        }
+    }
+
+    /// `client_side_rows_render_while_disconnected` — the two client-side reads
+    /// the panel's inventory delegates to answer with no connection (adele-mac#3,
+    /// #12), so the merged rows carry the client-run (and built-in) servers even
+    /// with no daemon fleet present. Gap 2: a disconnected panel is not an empty
+    /// one — the connection gates only the daemon population.
+    @MainActor @Test func clientSideRowsRenderWhileDisconnected() async throws {
+        try await withConfigHome(
+            seed: """
+                [[servers]]
+                name = "browser"
+                command = "/usr/bin/browser-mcp"
+                namespace = "web"
+
+                [surfaces.mac]
+                enabled = ["browser"]
+                """
+        ) { _ in
+            let core = macCore()  // connect() is never called
+
+            // Both client-side seams answer offline.
+            let client = await core.mcpClientServers()
+            let builtins = await core.mcpBuiltinServers()
+
+            // With no daemon fleet (disconnected), the merged rows are exactly the
+            // client-side populations — never empty when either is configured.
+            let rows = mcpServerRows(daemon: [], client: client, builtins: builtins)
+            #expect(
+                rows.contains { $0.name == "browser" && $0.runner == .client },
+                "the configured client-run server renders with no connection"
+            )
+            #expect(
+                rows.allSatisfy { $0.runner == .client },
+                "no daemon rows while disconnected, yet the client side still renders"
+            )
+            #expect(
+                rows.count == client.count + builtins.count,
+                "every client-side server becomes a row; nothing is dropped offline"
+            )
+        }
+    }
+
     /// The opt-out must also be what the core then *reports*, so the panel shows
     /// the pending state instead of looking unchanged until the next connect.
     @MainActor @Test func aDisabledBuiltinComesBackFlagged() async throws {

@@ -29,15 +29,16 @@ struct McpInventory: Sendable {
 
     /// What the shared core exposes today, read through `core`.
     ///
-    /// Built-ins arrive fully populated (adele-mac#12) — empty only when the core
-    /// was built with no MCP servers linked in, which is the honest "none
-    /// compiled in" rather than a missing answer. The external client-run
-    /// population still has no FFI read path, so it stays empty; the panel then
-    /// renders the daemon fleet plus the built-ins, and the runner filter still
-    /// works (the Client bucket simply holds built-in rows only).
+    /// Both client-side populations arrive fully populated (adele-mac#3, #12) and
+    /// are answerable with no connection: which servers are compiled in or
+    /// configured is a property of how the core was built plus the machine-local
+    /// `client-mcp.toml`, not of the daemon link. Either is empty only when
+    /// nothing of that kind is linked/configured — the honest "none" rather than
+    /// a missing answer. The panel merges both with the daemon fleet, and the
+    /// runner filter buckets them under Client.
     static func live(_ core: AdeleCore) -> McpInventory {
         McpInventory(
-            clientServers: { [] },
+            clientServers: { await core.mcpClientServers() },
             builtinServers: { await core.mcpBuiltinServers() }
         )
     }

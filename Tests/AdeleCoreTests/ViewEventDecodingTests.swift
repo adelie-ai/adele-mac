@@ -171,6 +171,43 @@ import Foundation
         #expect(servers.isEmpty)
     }
 
+    @Test func mcpClientServers() throws {
+        let json = """
+            {"type":"mcp_client_servers","surface":"mac","servers":[\
+            {"name":"browser","transport":"stdio","status":"running","tool_count":3,\
+            "namespace":"web"},\
+            {"name":"remote","transport":"http","status":"enabled","tool_count":0,\
+            "namespace":null}]}
+            """
+        guard case .mcpClientServers(let surface, let servers) = try decode(json) else {
+            Issue.record("expected .mcpClientServers"); return
+        }
+        #expect(surface == "mac", "the core echoes which surface it resolved")
+        #expect(servers.count == 2)
+        #expect(
+            servers[0] == McpClientServer(
+                name: "browser", transport: "stdio", status: "running", toolCount: 3,
+                namespace: "web"
+            )
+        )
+        // A null namespace decodes to nil so the client can fall back to the name.
+        #expect(servers[1].transport == "http")
+        #expect(servers[1].status == "enabled")
+        #expect(servers[1].namespace == nil)
+    }
+
+    /// A surface that hosts no external servers answers with an empty list — the
+    /// honest "none configured", which must decode rather than be malformed.
+    @Test func mcpClientServersEmpty() throws {
+        guard case .mcpClientServers(let surface, let servers) =
+            try decode(#"{"type":"mcp_client_servers","surface":"kde","servers":[]}"#)
+        else {
+            Issue.record("expected .mcpClientServers"); return
+        }
+        #expect(surface == "kde")
+        #expect(servers.isEmpty)
+    }
+
     @Test func scratchpadNoteDefaults() throws {
         let json = """
         {"type":"scratchpad","notes":[{"id":"n1","key":"k","content":"c","updated_at":"2026"}]}

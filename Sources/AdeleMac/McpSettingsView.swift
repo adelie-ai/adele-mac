@@ -70,20 +70,24 @@ struct McpSettingsView: View {
 
     var body: some View {
         Form {
-            if !model.connected {
-                Text("Connect to manage MCP servers.")
-                    .foregroundStyle(.secondary)
-            } else {
-                serverListSection
-                namespaceSection
+            // The client-side populations (built-in + external client-run) are
+            // local to this machine and answerable with no connection, so the
+            // list and its per-namespace counts always render. Only the daemon
+            // fleet — and the add form, which creates daemon-run servers — needs a
+            // connection.
+            serverListSection
+            namespaceSection
+            if model.connected {
                 addSection
-                if let error {
-                    Text(error).font(.caption).foregroundStyle(.red)
-                }
+            }
+            if let error {
+                Text(error).font(.caption).foregroundStyle(.red)
             }
         }
         .formStyle(.grouped)
-        .task { await reload() }
+        // Re-run when the connection flips: connecting loads the daemon fleet,
+        // disconnecting clears it while the client-side rows stay put.
+        .task(id: model.connected) { await reload() }
     }
 
     // MARK: Server list
@@ -130,18 +134,22 @@ struct McpSettingsView: View {
                 .help("Refresh")
                 .disabled(loading)
             }
+        } footer: {
+            // With client-side rows present but disconnected, the absent daemon
+            // rows are "not connected yet", not "none exist" — say so rather than
+            // let the list imply the daemon runs nothing.
+            if !model.connected {
+                Text("Daemon-run servers appear once you connect.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
-    /// Honest about *why* the list is empty: loading, filtered out, or genuinely
-    /// nothing configured.
+    /// Honest about *why* the list is empty — ported to a pure helper so the
+    /// "not connected ≠ no servers" decision is testable without a view host.
     private var emptyMessage: String {
-        if loading { return "Loading…" }
-        switch filter {
-        case .all: return "No MCP servers configured."
-        case .daemon: return "The daemon runs no MCP servers."
-        case .client: return "This client runs no MCP servers."
-        }
+        mcpEmptyServerListMessage(filter: filter, connected: model.connected, loading: loading)
     }
 
     // MARK: Tools by namespace
@@ -247,11 +255,19 @@ struct McpSettingsView: View {
         loading = true
         error = nil
         defer { loading = false }
-        // The client-side populations are local and cannot fail; only the daemon
-        // fetch can, and a failure there must not blank the rest of the panel.
+        // The client-side populations are local, answerable offline, and cannot
+        // fail; they load regardless of the connection so built-in and client-run
+        // rows render while disconnected.
         let source = activeInventory
         clientServers = await source.clientServers()
         builtinServers = await source.builtinServers()
+        // The daemon fetch genuinely needs a connection. While disconnected,
+        // clear the fleet rather than attempt a fetch that would only surface a
+        // "not connected" error over an otherwise usable panel.
+        guard model.connected else {
+            daemonServers = []
+            return
+        }
         do {
             daemonServers = try await model.core.listMcpServers()
         } catch {
