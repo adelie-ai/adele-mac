@@ -261,6 +261,13 @@ public enum ViewEvent: Decodable, Sendable {
     /// `servers` is empty on a core built with no MCP servers linked in, which is
     /// the honest answer rather than a missing one.
     case mcpBuiltins(surface: String, servers: [McpBuiltinServer])
+    /// This client's external client-run MCP servers (the `client-mcp.toml`
+    /// servers the `surface` hosts on the edge) and their live status — the reply
+    /// to `requestMcpClientServers`. Answerable offline: `servers` lists from
+    /// config even with no connection, and each row's tool count and
+    /// running/error status fill in once a host is running. Empty when the
+    /// surface enables no external servers.
+    case mcpClientServers(surface: String, servers: [McpClientServer])
     /// Any event not yet typed (scratchpad, voice, …).
     case unknown(type: String)
 
@@ -360,6 +367,11 @@ public enum ViewEvent: Decodable, Sendable {
             self = .mcpBuiltins(
                 surface: try c.decode(String.self, forKey: .surface),
                 servers: try c.decode([McpBuiltinServer].self, forKey: .servers)
+            )
+        case "mcp_client_servers":
+            self = .mcpClientServers(
+                surface: try c.decode(String.self, forKey: .surface),
+                servers: try c.decode([McpClientServer].self, forKey: .servers)
             )
         default:
             self = .unknown(type: type)
