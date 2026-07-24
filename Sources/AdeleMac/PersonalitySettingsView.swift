@@ -13,6 +13,12 @@ struct PersonalitySettingsView: View {
     @Environment(AppModel.self) private var model
 
     @State private var personality = Personality()
+    /// The daemon's last reported dials — the `lastKnown` fed to
+    /// `PersonalityWrite.planned`. Kept separate from the editable `personality`
+    /// so a dial reconciled to server state is recognised as a no-op and never
+    /// re-emitted (the durable fix from #10/#13; a suppression flag does not
+    /// survive a reconcile).
+    @State private var serverPersonality = Personality()
     @State private var loaded = false
     @State private var errorText: String?
 
@@ -39,7 +45,7 @@ struct PersonalitySettingsView: View {
             } else {
                 Section {
                     ForEach(traits, id: \.name) { trait in
-                        Picker(trait.name.capitalized, selection: binding(for: trait.keyPath)) {
+                        Picker(trait.name.capitalized, selection: binding(for: trait)) {
                             ForEach(Personality.levels, id: \.self) { level in
                                 Text(level.capitalized).tag(level)
                             }
@@ -65,12 +71,25 @@ struct PersonalitySettingsView: View {
     /// A two-way binding for one dial: reads the loaded level (falling back to a
     /// neutral default before the daemon's value has arrived) and, on change,
     /// updates local state and persists just that dial.
-    private func binding(for keyPath: WritableKeyPath<Personality, String?>) -> Binding<String> {
+    ///
+    /// The write is routed through `PersonalityWrite.planned`, which drops any
+    /// change whose result equals the daemon's last reported level. A reconcile
+    /// (or any future refresh/reconnect that assigns this dial from server
+    /// state) therefore cannot emit a write — the structural guard from
+    /// #10/#13, independent of when a change notification fires.
+    private func binding(
+        for trait: (name: String, keyPath: WritableKeyPath<Personality, String?>)
+    ) -> Binding<String> {
         Binding(
-            get: { personality[keyPath: keyPath] ?? "sometimes" },
+            get: { personality[keyPath: trait.keyPath] ?? "sometimes" },
             set: { newLevel in
-                personality[keyPath: keyPath] = newLevel
-                save(keyPath, newLevel)
+                personality[keyPath: trait.keyPath] = newLevel
+                guard let level = PersonalityWrite.planned(
+                    trait: trait.name,
+                    desired: newLevel,
+                    lastKnown: serverPersonality[keyPath: trait.keyPath]
+                ) else { return }
+                save(trait.keyPath, level)
             }
         )
     }
@@ -79,7 +98,9 @@ struct PersonalitySettingsView: View {
         guard model.connected else { return }
         errorText = nil
         do {
-            personality = try await model.core.getPersonality()
+            let loadedPersonality = try await model.core.getPersonality()
+            personality = loadedPersonality
+            serverPersonality = loadedPersonality
             loaded = true
         } catch {
             errorText = "\(error)"
@@ -94,6 +115,9 @@ struct PersonalitySettingsView: View {
         Task {
             do {
                 try await model.core.setPersonality(change)
+                // The daemon now holds this level; record it as last-known so a
+                // subsequent reconcile to the same value is dropped as a no-op.
+                serverPersonality[keyPath: keyPath] = level
             } catch {
                 errorText = "\(error)"
             }
