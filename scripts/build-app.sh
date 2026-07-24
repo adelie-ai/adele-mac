@@ -28,9 +28,10 @@ ADELE_CORE_LIB_DIR="$CORE_DIR/target/release" swift build -c release --product A
 BIN="$MAC_DIR/.build/release/AdeleMac"
 APP="$MAC_DIR/.build/AdeleMac.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Frameworks" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/AdeleMac"
 cp "$CORE_LIB" "$APP/Contents/Frameworks/libadele_client_core.dylib"
+cp "$MAC_DIR/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # The dylib's install_name is @rpath/libadele_client_core.dylib; add an
 # @executable_path RPATH so the bundled copy resolves at runtime.
@@ -45,6 +46,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>Adele</string>
     <key>CFBundleIdentifier</key><string>tech.spadea.adele-mac</string>
     <key>CFBundleExecutable</key><string>AdeleMac</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>

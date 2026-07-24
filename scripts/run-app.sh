@@ -25,8 +25,9 @@ swift build "${SWIFT_FLAGS[@]}"
 BIN="$MAC_DIR/.build/$CONFIG/AdeleMac"
 APP="$MAC_DIR/.build/AdeleMac.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/AdeleMac"
+cp "$MAC_DIR/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -37,6 +38,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>Adele</string>
     <key>CFBundleIdentifier</key><string>tech.spadea.adele-mac</string>
     <key>CFBundleExecutable</key><string>AdeleMac</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
