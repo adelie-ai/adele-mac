@@ -13,21 +13,29 @@ import SwiftUI
 /// `AdeleCore` (`mcpServerRows` / `mcpFilterRows` / `mcpRunnerLabel` /
 /// `mcpKindLabel`); this file is the thin SwiftUI shell over it.
 ///
-/// adele-mac administers the **daemon** fleet only: daemon rows get an enable
-/// toggle, a remove button and the add form, all issued through `model.core`.
-/// Client-run and built-in rows are owned by the shared Rust core, which exposes
-/// no write path over the FFI, so they render read-only with the reason
-/// (`mcpRowActions`). Their data arrives through ``McpInventory``, which answers
-/// empty until the core exposes those populations.
+/// Who administers what: **daemon** rows get an enable toggle, a remove button
+/// and the add form, all issued through `model.core`'s daemon command surface.
+/// **Built-in** rows get an enable toggle too, but it writes this client's
+/// per-surface opt-out through the core (which owns the machine-wide
+/// `client-mcp.toml`); they can never be removed, since they are compiled in.
+/// **External client-run** rows are definitions in that same shared file, which
+/// this panel does not administer, so they render read-only with the reason
+/// (`mcpRowActions`). Both client-side populations arrive through
+/// ``McpInventory``.
 ///
 /// Wire this in as a `SettingsView` tab, e.g.:
 ///   `McpSettingsView().tabItem { Label("MCP", systemImage: "puzzlepiece.extension") }`
 struct McpSettingsView: View {
     @Environment(AppModel.self) private var model
 
-    /// Where the client-run + built-in populations come from. Injected so
-    /// previews can exercise the built-in rendering the core cannot yet feed.
-    var inventory: McpInventory = .core
+    /// Where the client-run + built-in populations come from. `nil` reads them
+    /// from the app's core; previews inject a fixed inventory to exercise
+    /// rendering the linked core may not feed (its built-ins are chosen at build
+    /// time via `just build-with-mcp`).
+    var inventory: McpInventory?
+
+    /// The inventory in force: the injected one, else the live core.
+    private var activeInventory: McpInventory { inventory ?? .live(model.core) }
 
     @State private var daemonServers: [McpServerView] = []
     @State private var clientServers: [McpClientServer] = []
@@ -98,6 +106,7 @@ struct McpSettingsView: View {
                 ForEach(visibleRows) { row in
                     McpServerRowView(
                         row: row,
+                        builtin: builtin(for: row),
                         target: target(for: row),
                         enabled: isEnabled(row),
                         runnerLabel: mcpRunnerLabel(
@@ -218,11 +227,18 @@ struct McpSettingsView: View {
         return daemonServers.first { $0.name == row.name }?.target
     }
 
-    /// The toggle's state. Daemon rows carry an explicit `enabled` flag; every
-    /// other row reports its state only through the status/disabled reason.
+    /// The toggle's state. Daemon rows carry an explicit `enabled` flag; a
+    /// built-in reads on iff this surface has not opted out of it (an override
+    /// dims the row but leaves the switch on, because the built-in *is* still
+    /// enabled in config); anything else reports state only through its status.
     private func isEnabled(_ row: McpServerRow) -> Bool {
-        guard row.runner == .daemon else { return row.disabledReason == nil }
-        return daemonServers.first { $0.name == row.name }?.enabled ?? false
+        switch row.runner {
+        case .daemon:
+            return daemonServers.first { $0.name == row.name }?.enabled ?? false
+        case .client:
+            guard let builtin = builtin(for: row) else { return row.disabledReason == nil }
+            return mcpBuiltinToggleState(builtin).isOn
+        }
     }
 
     // MARK: Actions
@@ -233,8 +249,9 @@ struct McpSettingsView: View {
         defer { loading = false }
         // The client-side populations are local and cannot fail; only the daemon
         // fetch can, and a failure there must not blank the rest of the panel.
-        clientServers = await inventory.clientServers()
-        builtinServers = await inventory.builtinServers()
+        let source = activeInventory
+        clientServers = await source.clientServers()
+        builtinServers = await source.builtinServers()
         do {
             daemonServers = try await model.core.listMcpServers()
         } catch {
@@ -261,18 +278,38 @@ struct McpSettingsView: View {
         }
     }
 
-    /// The runner fork: only daemon rows are administrable from here, so the
-    /// toggle goes to the daemon's `SetMcpServerEnabled`. The view never offers
-    /// the control on a client-run or built-in row (`mcpRowActions`); this guard
-    /// keeps the invariant local rather than trusting the caller.
+    /// The runner fork, both directions of it.
+    ///
+    /// A daemon row's toggle goes to the daemon's `SetMcpServerEnabled`. A
+    /// built-in's writes this client's per-surface opt-out through the core,
+    /// which owns the shared `client-mcp.toml` — the core answers with the
+    /// refreshed inventory, so the row reflects the change immediately even
+    /// though the running MCP host only picks it up on the next connect. An
+    /// external client-run row offers no toggle at all (`mcpRowActions`); the
+    /// guards here keep that invariant local rather than trusting the caller.
     private func setEnabled(_ row: McpServerRow, _ enabled: Bool) async {
-        guard mcpBackend(for: row.runner) == .daemon else { return }
-        do {
-            try await model.core.setMcpServerEnabled(name: row.name, enabled: enabled)
-            await reload()
-        } catch {
-            self.error = "Failed to update \(row.name): \(error)"
+        switch mcpBackend(for: row.runner) {
+        case .daemon:
+            do {
+                try await model.core.setMcpServerEnabled(name: row.name, enabled: enabled)
+                await reload()
+            } catch {
+                self.error = "Failed to update \(row.name): \(error)"
+            }
+        case .client:
+            guard row.kind == .builtIn else { return }
+            builtinServers = await model.core.setMcpBuiltinDisabled(
+                name: row.name, disabled: !enabled
+            )
         }
+    }
+
+    /// The built-in a row was projected from, when it was one — the enable
+    /// control's on/off and usability come from it, not from the row (which
+    /// flattens the override and opt-out into one reason string).
+    private func builtin(for row: McpServerRow) -> McpBuiltinServer? {
+        guard row.kind == .builtIn else { return nil }
+        return builtinServers.first { $0.name == row.name }
     }
 
     private func remove(_ row: McpServerRow) async {
@@ -301,10 +338,14 @@ private func toolsPhrase(_ count: UInt32) -> String {
 
 /// One MCP server row: status dot, name with runner + kind chips, a status
 /// subtitle carrying the tool count and (for daemon rows) the target, the last
-/// connection error, and — for daemon rows only — an enable toggle and a remove
-/// action. Rows the client cannot administer render dimmed and explain why.
+/// connection error, an enable toggle for daemon and built-in rows, and a remove
+/// action for daemon rows only. Rows that cannot serve render dimmed, and a row
+/// whose control is unavailable explains why.
 private struct McpServerRowView: View {
     let row: McpServerRow
+    /// The built-in this row was projected from, when it is one — the enable
+    /// control's usability turns on the override/opt-out split the row flattens.
+    let builtin: McpBuiltinServer?
     /// The daemon-only connection target, when there is one.
     let target: String?
     let enabled: Bool
@@ -312,7 +353,7 @@ private struct McpServerRowView: View {
     let onToggle: (Bool) async -> Void
     let onDelete: () async -> Void
 
-    private var actions: McpRowActions { mcpRowActions(for: row) }
+    private var actions: McpRowActions { mcpRowActions(for: row, builtin: builtin) }
 
     var body: some View {
         HStack(spacing: 10) {

@@ -6,28 +6,43 @@ import Foundation
 /// the **built-in** servers compiled into the client and hosted in-process.
 ///
 /// Why a seam rather than a direct call: adele-mac surfaces only what the
-/// core/daemon expose (adele-mac#3). Both populations live behind the shared
-/// Rust core — the machine-local `~/.config/adele/client-mcp.toml` the ffi
-/// engine loads, and (for built-ins) an in-process host the ffi cdylib does not
-/// currently build. Neither is reachable over the C ABI, which carries only the
-/// typed chat intents and the generic `send_command` bridge. So the panel is
-/// wired to render both populations correctly and asks for them through this
-/// seam; ``core`` answers empty until the core grows the corresponding FFI
-/// calls, at which point this file is the only one that changes.
+/// core/daemon expose (adele-mac#3), and the two populations became reachable at
+/// different times. Both live behind the shared Rust core — the machine-local
+/// `~/.config/adele/client-mcp.toml` the ffi engine loads, and (for built-ins)
+/// the servers compiled into that cdylib and hosted in its own process. Keeping
+/// the panel's source behind this one type means a population arriving on the
+/// FFI changes only this file, and lets previews exercise rendering the linked
+/// core cannot currently feed.
 ///
-/// Deliberately NOT done here: re-reading and re-writing `client-mcp.toml` from
-/// Swift. It is a machine-level file the Rust side owns (and whose schema
-/// includes the per-surface `disabled_builtins` set built-in toggles write), and
-/// a second, independent parser/writer for it would be a correctness hazard for
-/// every other surface sharing the file.
+/// Deliberately NOT done here: re-reading or re-writing `client-mcp.toml` from
+/// Swift. It is a machine-level file the Rust side owns — every other surface on
+/// the box shares it, and its schema includes the per-surface
+/// `disabled_builtins` set the built-in toggles write — so a second, independent
+/// parser/writer would be a correctness hazard for all of them. The built-in
+/// opt-out therefore goes through ``AdeleCore/setMcpBuiltinDisabled(name:disabled:)``,
+/// which is the core writing its own file.
 struct McpInventory: Sendable {
     /// External MCP servers this client runs on the edge.
     var clientServers: @Sendable () async -> [McpClientServer]
     /// MCP servers compiled into the client and hosted in-process.
     var builtinServers: @Sendable () async -> [McpBuiltinServer]
 
-    /// What the shared core exposes today: neither population. The panel then
-    /// renders the daemon fleet alone, and the runner filter still works (the
-    /// Client bucket is simply empty).
-    static let core = McpInventory(clientServers: { [] }, builtinServers: { [] })
+    /// What the shared core exposes today, read through `core`.
+    ///
+    /// Built-ins arrive fully populated (adele-mac#12) — empty only when the core
+    /// was built with no MCP servers linked in, which is the honest "none
+    /// compiled in" rather than a missing answer. The external client-run
+    /// population still has no FFI read path, so it stays empty; the panel then
+    /// renders the daemon fleet plus the built-ins, and the runner filter still
+    /// works (the Client bucket simply holds built-in rows only).
+    static func live(_ core: AdeleCore) -> McpInventory {
+        McpInventory(
+            clientServers: { [] },
+            builtinServers: { await core.mcpBuiltinServers() }
+        )
+    }
+
+    /// Both populations empty — the panel then renders the daemon fleet alone.
+    /// For previews and for callers with no core to read from.
+    static let empty = McpInventory(clientServers: { [] }, builtinServers: { [] })
 }

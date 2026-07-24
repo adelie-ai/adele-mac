@@ -182,6 +182,11 @@ build-with-mcp *SERVERS:
     ADELE_CORE_FEATURES="$args" ./scripts/build-core.sh
     swift build --product AdeleMac
 
+# `McpBuiltinInventoryTests` asserts against whichever core is linked. To PIN the
+# exact set it must report, name it in ADELE_EXPECT_BUILTINS, e.g.
+#   ADELE_EXPECT_BUILTINS=fileio,terminal,tasks,web just test-with-mcp
+# (not derived from SERVERS automatically: terminal and tasks have fallible
+# constructors and may legitimately be absent in a hostile environment).
 # Run the Swift test suite against a core carrying a chosen set of built-ins.
 test-with-mcp *SERVERS:
     #!/usr/bin/env bash
