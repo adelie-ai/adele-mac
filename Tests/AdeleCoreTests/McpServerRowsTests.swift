@@ -308,7 +308,7 @@ import Foundation
         #expect(mcpBackend(for: .client) == .client)
     }
 
-    @Test func daemonRowsAreEditableAndExternalClientRowsAreNot() throws {
+    @Test func everyPopulationOffersTheControlsItsBackendCanHonour() throws {
         let disabledBuiltin = builtin("web", disabledByConfig: true)
         let rows = mcpServerRows(
             daemon: [try daemonView("alpha")],
@@ -323,13 +323,12 @@ import Foundation
         #expect(daemonActions.help == nil)
 
         // An EXTERNAL client-run server is defined in the machine-wide
-        // client-mcp.toml and this panel does not administer definitions, so its
-        // row stays read-only and must say why rather than offering a control
-        // that does nothing.
+        // client-mcp.toml, which the core writes on this client's behalf: the
+        // toggle sets this client's own selection, and the remove deletes the
+        // definition for every client on the machine.
         let clientActions = mcpRowActions(for: try #require(byName["beta"]))
-        #expect(!clientActions.canToggle)
-        #expect(!clientActions.canRemove)
-        #expect(clientActions.help != nil)
+        #expect(clientActions.canToggle)
+        #expect(clientActions.canRemove)
 
         // A built-in IS administrable now (adele-mac#12): the core writes this
         // surface's opt-out. It still can't be removed — it is compiled in.

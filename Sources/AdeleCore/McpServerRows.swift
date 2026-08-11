@@ -13,12 +13,12 @@ import Foundation
 // (reason strings, sort order, chip text) so the two stay in step.
 //
 // Scope note: adele-mac surfaces only what the core/daemon expose. It hosts no
-// MCP servers of its own — the built-in population is compiled into the shared
-// Rust core (`just build-with-mcp`) and hosted there in-process, and the core
-// reports it over the FFI along with each server's per-surface status
-// (adele-mac#12). The EXTERNAL client-run population is still not on the FFI
-// surface, so it is modelled here in full but fed empty. See `McpInventory` in
-// the app target for both seams.
+// MCP servers in its own process — the built-in population is compiled into the
+// shared Rust core (`just build-with-mcp`) and hosted there in-process, and the
+// EXTERNAL client-run population is defined in the machine-wide
+// `client-mcp.toml` and started by the core's MCP host. The core reports both
+// over the FFI, with each server's per-surface status, and writes both on this
+// client's behalf. See `McpInventory` in the app target for the two seams.
 
 /// Where an MCP server actually runs. The panel groups and filters by this, and
 /// it drives the [`mcpRunnerLabel`] chip.
@@ -572,8 +572,9 @@ public func mcpBuiltinToggleState(_ builtin: McpBuiltinServer) -> McpBuiltinTogg
 ///   control's usability turns on; without it the control stays inert rather
 ///   than writing a state that cannot be determined.
 /// - **External client-run** rows are definitions in the machine-wide
-///   `client-mcp.toml`, which this panel does not administer, so they are
-///   read-only and say why rather than offering a control that does nothing.
+///   `client-mcp.toml`. The core owns that file and writes it on this client's
+///   behalf, so they toggle (this client's own selection) and remove (the
+///   definition, for every client on the machine).
 ///
 /// A disabled built-in explains itself with the row's own reason (shadowed, or
 /// turned off in config).
@@ -589,8 +590,11 @@ public func mcpRowActions(
         let canToggle = builtin.map { mcpBuiltinToggleState($0).isInteractive } ?? false
         return McpRowActions(canToggle: canToggle, canRemove: false, help: help)
     case .client:
-        let help = row.disabledReason ?? "Run by this client from the machine's client-mcp.toml."
-        return McpRowActions(canToggle: false, canRemove: false, help: help)
+        return McpRowActions(
+            canToggle: true,
+            canRemove: true,
+            help: row.disabledReason
+        )
     }
 }
 
