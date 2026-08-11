@@ -59,7 +59,8 @@ model listing, voice) via `AdeleSmoke`.
   dictation (mic button in the composer).
 - **Settings (⌘,)** — model **purposes**, **connections editor**
   (create/update/delete anthropic/openai/bedrock/ollama, with **direct credential
-  entry** and edit pre-fill), **MCP servers**, **personality** (7 dials); plus a
+  entry** and edit pre-fill), **MCP servers** (daemon-run and **client-run**:
+  add, enable and remove either), **personality** (7 dials); plus a
   **knowledge base** browser/editor. All over a generic FFI management bridge
   (`adele_core_send_command`).
 - **Conversations** — new/select/delete, **rename**, **archive/unarchive**

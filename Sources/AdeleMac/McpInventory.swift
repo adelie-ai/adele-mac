@@ -26,6 +26,15 @@ struct McpInventory: Sendable {
     var clientServers: @Sendable () async -> [McpClientServer]
     /// MCP servers compiled into the client and hosted in-process.
     var builtinServers: @Sendable () async -> [McpBuiltinServer]
+    /// Add an external client-run server, or edit the one of the same name.
+    /// Answers with the refreshed client-run population.
+    var upsertClientServer: @Sendable (_ name: String, _ command: String, _ args: [String],
+        _ namespace: String?) async -> [McpClientServer]
+    /// Delete an external client-run definition, for every client on the machine.
+    var removeClientServer: @Sendable (_ name: String) async -> [McpClientServer]
+    /// Turn an external client-run server on or off for this client alone.
+    var setClientServerEnabled: @Sendable (_ name: String, _ enabled: Bool) async ->
+        [McpClientServer]
 
     /// What the shared core exposes today, read through `core`.
     ///
@@ -39,11 +48,25 @@ struct McpInventory: Sendable {
     static func live(_ core: AdeleCore) -> McpInventory {
         McpInventory(
             clientServers: { await core.mcpClientServers() },
-            builtinServers: { await core.mcpBuiltinServers() }
+            builtinServers: { await core.mcpBuiltinServers() },
+            upsertClientServer: { name, command, args, namespace in
+                await core.upsertMcpClientServer(
+                    name: name, command: command, args: args, namespace: namespace
+                )
+            },
+            removeClientServer: { await core.removeMcpClientServer(name: $0) },
+            setClientServerEnabled: { await core.setMcpClientServerEnabled(name: $0, enabled: $1) }
         )
     }
 
-    /// Both populations empty — the panel then renders the daemon fleet alone.
-    /// For previews and for callers with no core to read from.
-    static let empty = McpInventory(clientServers: { [] }, builtinServers: { [] })
+    /// Both populations empty, and every write a no-op that answers empty — the
+    /// panel then renders the daemon fleet alone. For previews and for callers
+    /// with no core to read from.
+    static let empty = McpInventory(
+        clientServers: { [] },
+        builtinServers: { [] },
+        upsertClientServer: { _, _, _, _ in [] },
+        removeClientServer: { _ in [] },
+        setClientServerEnabled: { _, _ in [] }
+    )
 }

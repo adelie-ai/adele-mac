@@ -201,10 +201,28 @@ public final class AdeleCore: @unchecked Sendable {
     /// external servers answers with an empty array.
     @MainActor
     public func mcpClientServers() async -> [McpClientServer] {
+        await withRefreshedClientServers { adele_core_request_mcp_client_servers($0) }
+    }
+
+    /// Run one client-run MCP request against the core and answer with the
+    /// inventory it emits in response.
+    ///
+    /// Shared by the read and by every write (``upsertMcpClientServer(name:command:args:namespace:enabled:)``
+    /// and its siblings), because the core answers all of them the same way: one
+    /// `mcp_client_servers` event, carrying the state on disk. Awaiting that one
+    /// event rather than issuing a separate read keeps a write from racing a
+    /// concurrent read. The event carries no correlation id, so the waiters are a
+    /// queue.
+    ///
+    /// Answers `[]` with no live core, matching every other call here.
+    @MainActor
+    func withRefreshedClientServers(
+        _ request: (OpaquePointer) -> Void
+    ) async -> [McpClientServer] {
         guard let handle else { return [] }
         return await withCheckedContinuation { continuation in
             pendingClientServers.append(continuation)
-            adele_core_request_mcp_client_servers(handle)
+            request(handle)
         }
     }
 

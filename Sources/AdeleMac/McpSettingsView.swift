@@ -13,15 +13,19 @@ import SwiftUI
 /// `AdeleCore` (`mcpServerRows` / `mcpFilterRows` / `mcpRunnerLabel` /
 /// `mcpKindLabel`); this file is the thin SwiftUI shell over it.
 ///
-/// Who administers what: **daemon** rows get an enable toggle, a remove button
-/// and the add form, all issued through `model.core`'s daemon command surface.
-/// **Built-in** rows get an enable toggle too, but it writes this client's
-/// per-surface opt-out through the core (which owns the machine-wide
-/// `client-mcp.toml`); they can never be removed, since they are compiled in.
-/// **External client-run** rows are definitions in that same shared file, which
-/// this panel does not administer, so they render read-only with the reason
-/// (`mcpRowActions`). Both client-side populations arrive through
-/// ``McpInventory``.
+/// Who administers what: **daemon** rows get an enable toggle and a remove
+/// button, issued through `model.core`'s daemon command surface. **Built-in**
+/// rows get an enable toggle too, but it writes this client's per-surface
+/// opt-out through the core (which owns the machine-wide `client-mcp.toml`);
+/// they can never be removed, since they are compiled in. **External
+/// client-run** rows are definitions in that same shared file: their toggle
+/// writes this client's selection, and their remove deletes the definition for
+/// every client on the machine. Every client-side read and write goes through
+/// ``McpInventory``, so the core stays the only writer of that file.
+///
+/// The add form creates a server on either side. The location picker decides
+/// which, and a client-run add works while disconnected, because the file it
+/// writes is local.
 ///
 /// Wire this in as a `SettingsView` tab, e.g.:
 ///   `McpSettingsView().tabItem { Label("MCP", systemImage: "puzzlepiece.extension") }`
@@ -46,6 +50,7 @@ struct McpSettingsView: View {
 
     // Add-server form.
     @State private var showingAdd = false
+    @State private var newLocation: McpAddLocation = .daemon
     @State private var newName = ""
     @State private var newCommand = ""
     @State private var newArgs = ""
@@ -72,14 +77,12 @@ struct McpSettingsView: View {
         Form {
             // The client-side populations (built-in + external client-run) are
             // local to this machine and answerable with no connection, so the
-            // list and its per-namespace counts always render. Only the daemon
-            // fleet — and the add form, which creates daemon-run servers — needs a
-            // connection.
+            // list, its per-namespace counts and the add form all render while
+            // disconnected. Only the daemon fleet, and adding a daemon-run
+            // server, need a connection.
             serverListSection
             namespaceSection
-            if model.connected {
-                addSection
-            }
+            addSection
             if let error {
                 Text(error).font(.caption).foregroundStyle(.red)
             }
@@ -187,10 +190,24 @@ struct McpSettingsView: View {
     @ViewBuilder private var addSection: some View {
         Section {
             if showingAdd {
+                Picker("Runs on", selection: $newLocation) {
+                    ForEach(McpAddLocation.allCases, id: \.self) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .help("Choose whether the daemon or this Mac runs the new server")
                 TextField("Name", text: $newName)
                 TextField("Command", text: $newCommand)
                 TextField("Arguments (space or comma separated)", text: $newArgs)
                 TextField("Namespace (optional)", text: $newNamespace)
+                // A name that means more than a new server (an override, or an
+                // edit of one already defined here) says so before the write.
+                if let note = mcpAddNameNote(name: newName, location: newLocation, rows: rows) {
+                    Text(note)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 HStack {
                     Button("Cancel") { resetAddForm() }
                     Spacer()
@@ -208,7 +225,7 @@ struct McpSettingsView: View {
         } header: {
             Text("Add")
         } footer: {
-            Text("Added servers are run by the daemon.")
+            Text(mcpAddFooter(location: newLocation, connected: model.connected))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -217,6 +234,7 @@ struct McpSettingsView: View {
     private var canAdd: Bool {
         !newName.trimmingCharacters(in: .whitespaces).isEmpty
             && !newCommand.trimmingCharacters(in: .whitespaces).isEmpty
+            && mcpCanAdd(location: newLocation, connected: model.connected)
     }
 
     /// Split the args field on whitespace and commas, dropping empties.
@@ -244,7 +262,7 @@ struct McpSettingsView: View {
         case .daemon:
             return daemonServers.first { $0.name == row.name }?.enabled ?? false
         case .client:
-            guard let builtin = builtin(for: row) else { return row.disabledReason == nil }
+            guard let builtin = builtin(for: row) else { return mcpClientRowIsOn(row) }
             return mcpBuiltinToggleState(builtin).isOn
         }
     }
@@ -275,22 +293,37 @@ struct McpSettingsView: View {
         }
     }
 
+    /// Create the server on the side the form selected: the daemon's own fleet,
+    /// or this Mac's `client-mcp.toml` through the core.
     private func add() async {
         adding = true
         defer { adding = false }
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        let command = newCommand.trimmingCharacters(in: .whitespaces)
         let namespace = newNamespace.trimmingCharacters(in: .whitespaces)
-        do {
-            try await model.core.addMcpServer(
-                name: newName.trimmingCharacters(in: .whitespaces),
-                command: newCommand.trimmingCharacters(in: .whitespaces),
-                args: parsedArgs,
-                namespace: namespace.isEmpty ? nil : namespace,
-                enabled: true
+        switch newLocation {
+        case .daemon:
+            do {
+                try await model.core.addMcpServer(
+                    name: name,
+                    command: command,
+                    args: parsedArgs,
+                    namespace: namespace.isEmpty ? nil : namespace,
+                    enabled: true
+                )
+                resetAddForm()
+                await reload()
+            } catch {
+                self.error = "Failed to add server: \(error)"
+            }
+        case .client:
+            // The core answers the write with the population it read back, so
+            // the new row renders from disk rather than from an optimistic edit.
+            // A refused write comes back as a toast plus the unchanged list.
+            clientServers = await activeInventory.upsertClientServer(
+                name, command, parsedArgs, namespace.isEmpty ? nil : namespace
             )
             resetAddForm()
-            await reload()
-        } catch {
-            self.error = "Failed to add server: \(error)"
         }
     }
 
@@ -313,10 +346,15 @@ struct McpSettingsView: View {
                 self.error = "Failed to update \(row.name): \(error)"
             }
         case .client:
-            guard row.kind == .builtIn else { return }
-            builtinServers = await model.core.setMcpBuiltinDisabled(
-                name: row.name, disabled: !enabled
-            )
+            if row.kind == .builtIn {
+                builtinServers = await model.core.setMcpBuiltinDisabled(
+                    name: row.name, disabled: !enabled
+                )
+            } else {
+                // This client's own selection only: another client on this Mac
+                // that lists the same server keeps running it.
+                clientServers = await activeInventory.setClientServerEnabled(row.name, enabled)
+            }
         }
     }
 
@@ -328,18 +366,32 @@ struct McpSettingsView: View {
         return builtinServers.first { $0.name == row.name }
     }
 
+    /// Remove a row's server: the daemon's own, or a client-run definition.
+    ///
+    /// A built-in is compiled into the core and offers no remove
+    /// (`mcpRowActions`); the guard keeps that invariant local rather than
+    /// trusting the caller.
     private func remove(_ row: McpServerRow) async {
-        guard mcpBackend(for: row.runner) == .daemon else { return }
-        do {
-            try await model.core.removeMcpServer(name: row.name)
-            await reload()
-        } catch {
-            self.error = "Failed to remove \(row.name): \(error)"
+        switch mcpBackend(for: row.runner) {
+        case .daemon:
+            do {
+                try await model.core.removeMcpServer(name: row.name)
+                await reload()
+            } catch {
+                self.error = "Failed to remove \(row.name): \(error)"
+            }
+        case .client:
+            guard row.kind != .builtIn else { return }
+            // Machine-wide: the definition goes for every client on this Mac.
+            clientServers = await activeInventory.removeClientServer(row.name)
         }
     }
 
     private func resetAddForm() {
         showingAdd = false
+        // Offer the location that can actually be used: while disconnected, only
+        // this Mac can take a new server.
+        newLocation = model.connected ? .daemon : .client
         newName = ""
         newCommand = ""
         newArgs = ""
