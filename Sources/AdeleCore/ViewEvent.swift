@@ -228,6 +228,21 @@ public enum ViewEvent: Decodable, Sendable {
     /// checked out for editing) plus the slot being edited — drives the "N
     /// queued" chips.
     case queuedMessages(messages: [String], editing: Int?)
+    /// The cancel handle for the turn streaming into the open conversation, or
+    /// `nil` when there is nothing to cancel.
+    ///
+    /// A view offers its Cancel control exactly while this is non-nil, and acts
+    /// on it with ``AdeleCore/cancelTask(_:)``. `nil` covers every reason a turn
+    /// cannot be cancelled: none is in flight, it finished or was abandoned, it
+    /// was adopted from another client, or the daemon acked without an id.
+    ///
+    /// Reported only when the answer changes.
+    case activeTurn(taskID: String?)
+    /// The prompt of a turn that just failed, offered back for a resend.
+    ///
+    /// One-shot: the core clears the offer as it makes it. Apply it only to an
+    /// empty composer, so text typed while waiting is never overwritten.
+    case retryPrompt(text: String)
     case chunk(text: String)
     case complete(text: String)
     case models([ModelListing])
@@ -275,6 +290,7 @@ public enum ViewEvent: Decodable, Sendable {
         case type, label, message, text, value, items, detail, usage, content
         case selection, model, task, id, entry, entries, notes, level, kind
         case messages, editing, surface, servers
+        case taskId = "task_id"
         case progressHint = "progress_hint"
     }
 
@@ -313,6 +329,14 @@ public enum ViewEvent: Decodable, Sendable {
                 messages: try c.decode([String].self, forKey: .messages),
                 editing: try c.decodeIfPresent(Int.self, forKey: .editing)
             )
+        case "active_turn":
+            // `decodeIfPresent` rather than `decode`: an explicit null and an
+            // absent key both mean "nothing to cancel", and treating a missing
+            // field as a decode failure would drop the event that withdraws a
+            // stale Cancel control.
+            self = .activeTurn(taskID: try c.decodeIfPresent(String.self, forKey: .taskId))
+        case "retry_prompt":
+            self = .retryPrompt(text: try c.decode(String.self, forKey: .text))
         case "chunk":
             self = .chunk(text: try c.decode(String.self, forKey: .text))
         case "complete":
