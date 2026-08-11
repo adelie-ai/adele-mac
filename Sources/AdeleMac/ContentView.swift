@@ -575,6 +575,21 @@ private struct ComposerView: View {
             }
             .buttonStyle(.plain)
             .help(isDictating ? "Stop dictation" : "Dictate")
+            // Stop the running turn (#22). Present only while the core reports a
+            // handle, and beside Send rather than in place of it — a message
+            // typed mid-reply is QUEUED (#1), so cancelling must not be the only
+            // way to act on a turn that is taking too long.
+            if model.turn.canCancel {
+                Button {
+                    model.cancelTurn()
+                } label: {
+                    Image(systemName: "stop.circle.fill")
+                        .font(.system(size: 26))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Stop this reply")
+            }
             Button {
                 model.send()
             } label: {

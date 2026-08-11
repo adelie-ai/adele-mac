@@ -115,6 +115,8 @@ final class AppModel {
     /// The open conversation's message queue (#1), replaced wholesale by each
     /// `queued_messages` event.
     var queued = QueuedMessagesState()
+    /// Whether the running turn can be cancelled, and by what handle (#22).
+    var turn = TurnState()
 
     // Connection profiles
     var profiles: [Profile] = []
@@ -299,6 +301,16 @@ final class AppModel {
 
     var activeConversations: [ConversationSummary] { conversations.filter { !$0.archived } }
     var archivedConversations: [ConversationSummary] { conversations.filter(\.archived) }
+
+    /// Stop the turn streaming into the open conversation.
+    ///
+    /// A no-op without a handle, which is also when no control offers it. Send
+    /// stays live either way: the core queues a submit made mid-stream rather
+    /// than refusing it, so cancelling is not the only way out of a running turn.
+    func cancelTurn() {
+        guard let taskID = turn.cancelableTaskID else { return }
+        core.cancelTask(taskID)
+    }
 
     func send() {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -672,6 +684,16 @@ final class AppModel {
 
         case .queuedMessages(let messages, let editing):
             queued = QueuedMessagesState(messages: messages, editing: editing)
+
+        case .activeTurn(let taskID):
+            turn.apply(activeTaskID: taskID)
+
+        case .retryPrompt(let text):
+            // Put a failed turn's prompt back for a one-click resend, but never
+            // over text typed while waiting.
+            if let restored = TurnState.composerAfterRetryOffer(text, composer: draft) {
+                draft = restored
+            }
 
         case .chunk(let text):
             appendChunk(text)
