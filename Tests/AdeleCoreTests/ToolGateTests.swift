@@ -38,10 +38,11 @@ import Testing
 
     // MARK: Writing a new state
 
-    private func wire(_ command: AdeleCommand) throws -> [String: Any] {
-        let data = try JSONEncoder().encode(command)
-        return try #require(
-            JSONSerialization.jsonObject(with: data) as? [String: Any])
+    /// `AdeleCommand` builders return the wire JSON as a string, so a case
+    /// parses that back rather than re-encoding the builder.
+    private func wire(_ json: String) throws -> [String: Any] {
+        try #require(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
     }
 
     /// Turning the gate off sends the command the daemon defines, under the
@@ -49,6 +50,7 @@ import Testing
     @Test func disablingTheGateBuildsTheDaemonsCommand() throws {
         let json = try wire(
             AdeleCommand.setConversationToolGate(conversationID: "c1", disabled: true))
+
         let payload = try #require(json["set_conversation_tool_gate"] as? [String: Any])
         #expect(payload["conversation_id"] as? String == "c1")
         #expect(payload["disabled"] as? Bool == true)
@@ -71,13 +73,17 @@ import Testing
     /// hold.
     @Test func theStoredValueIsReadFromTheReply() throws {
         let data = Data(#"{"result":{"conversation_tool_gate":{"disabled":true}}}"#.utf8)
-        #expect(try ToolGate.storedValue(fromCommandResult: data) == true)
+        let envelope = try JSONDecoder().decode(
+            CommandResultEnvelope<ConversationToolGateResultPayload>.self, from: data)
+        #expect(envelope.result?.conversationToolGate.disabled == true)
     }
 
     /// A reply that is not this command's result yields nothing, so a caller
     /// cannot mistake an unrelated payload for a confirmed write.
     @Test func anUnrelatedReplyYieldsNoStoredValue() throws {
         let data = Data(#"{"result":{"ack":{}}}"#.utf8)
-        #expect(try ToolGate.storedValue(fromCommandResult: data) == nil)
+        let envelope = try? JSONDecoder().decode(
+            CommandResultEnvelope<ConversationToolGateResultPayload>.self, from: data)
+        #expect(envelope?.result == nil)
     }
 }
