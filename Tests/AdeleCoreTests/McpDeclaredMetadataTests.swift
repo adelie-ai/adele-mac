@@ -83,10 +83,11 @@ import Testing
     // MARK: Sanitizing
 
     /// A title carrying newlines, tabs and control characters renders on one
-    /// line. Whitespace runs collapse to a single space and the rest is dropped.
+    /// line. Each run of whitespace becomes a single space, control characters
+    /// are dropped, and the ends are trimmed.
     @Test func aDeclaredTitleRendersOnOneLine() throws {
         let row = try row("srv", title: "  Multi\n\nline\tname\u{0007}  ")
-        #expect(row.title == "Multiline name")
+        #expect(row.title == "Multi line name")
     }
 
     /// The same rule applies to a description.
@@ -99,7 +100,36 @@ import Testing
     /// rest of a row off screen.
     @Test func aLongDescriptionIsClamped() throws {
         let row = try row("srv", description: String(repeating: "a", count: 500))
-        #expect(row.description?.count == mcpMaxDeclaredCharacters)
+        #expect(row.description?.unicodeScalars.count == mcpMaxDeclaredCharacters)
+    }
+
+    /// The cap is a ceiling, including where the clamp falls on a word break.
+    /// A separator written just under the limit must not carry the next scalar
+    /// past it, and must not survive as a trailing space with nothing after it.
+    ///
+    /// `client-ui-common`'s `sanitize_declared` fails both halves of this
+    /// (adelie-ai/client-ui-common#56); this port does not copy that.
+    @Test func theClampIsNeverExceededAtAWordBreak() throws {
+        for wordLength in 1...5 {
+            let word = String(repeating: "a", count: wordLength)
+            let words = Array(repeating: word, count: 400).joined(separator: " ")
+            let clamped = try #require(row("srv", description: words).description)
+            #expect(
+                clamped.unicodeScalars.count <= mcpMaxDeclaredCharacters,
+                "word length \(wordLength) produced \(clamped.unicodeScalars.count)")
+            #expect(!clamped.hasSuffix(" "), "word length \(wordLength) left a trailing space")
+        }
+    }
+
+    /// The cap counts Unicode scalars, the unit `client-ui-common` counts, so
+    /// the two clients clamp the same text at the same point. Measuring
+    /// grapheme clusters instead would let a string of combining characters run
+    /// far past the limit.
+    @Test func theClampCountsScalarsNotGraphemes() throws {
+        // Each element is one grapheme cluster built from two scalars.
+        let combining = String(repeating: "e\u{0301}", count: 300)
+        let row = try row("srv", description: combining)
+        #expect(row.description?.unicodeScalars.count == mcpMaxDeclaredCharacters)
     }
 
     /// A value that is only whitespace and control characters is absent, not an

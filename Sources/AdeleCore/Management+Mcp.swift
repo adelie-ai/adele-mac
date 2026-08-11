@@ -6,6 +6,16 @@ import Foundation
 /// extra optional oauth/configure fields the daemon may also send.
 public struct McpServerView: Decodable, Identifiable, Hashable, Sendable {
     public let name: String
+    /// Display name the server declared for itself in `serverInfo.title`
+    /// (SEP-973). ``name`` stays the programmatic identity used in config,
+    /// namespacing and errors, so a renderer must keep it visible.
+    public let title: String?
+    /// What the server says it offers (`serverInfo.description`).
+    public let description: String?
+    /// The server's home page (`serverInfo.websiteUrl`). **Untrusted** — a
+    /// renderer must check the scheme before offering it as a link; the panel
+    /// model does that in ``mcpServerRows(daemon:client:builtins:)``.
+    public let websiteURL: String?
     public let command: String
     public let args: [String]
     public let namespace: String?
@@ -24,8 +34,10 @@ public struct McpServerView: Decodable, Identifiable, Hashable, Sendable {
     public var id: String { name }
 
     enum CodingKeys: String, CodingKey {
-        case name, command, args, namespace, enabled, status, transport, target, detail
+        case name, title, description, command, args, namespace, enabled, status, transport, target,
+            detail
         case toolCount = "tool_count"
+        case websiteURL = "website_url"
     }
 }
 
