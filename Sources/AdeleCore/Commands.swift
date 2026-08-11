@@ -144,3 +144,21 @@ extension AdeleCommand {
                     conversation_id: conversationID, disabled: disabled)))
     }
 }
+
+// MARK: - Tool-usage cost query (desktop-assistant#599)
+
+extension AdeleCommand {
+    /// Build the `GetToolUsage` wire JSON.
+    ///
+    /// Read-only and derived, so it is safe to send at any time and it answers
+    /// retroactively for a conversation whose turns are long finished.
+    public static func getToolUsage(conversationID: String) -> String {
+        struct Payload: Encodable {
+            let conversation_id: String
+        }
+        struct Wrapper: Encodable {
+            let get_tool_usage: Payload
+        }
+        return encode(Wrapper(get_tool_usage: Payload(conversation_id: conversationID)))
+    }
+}
