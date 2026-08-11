@@ -33,6 +33,7 @@ func finish(_ code: Int32, _ message: String) -> Never {
 let core = AdeleCore()
 var isConnected = false
 var promptSent = false
+var toolUsageProbed = false
 
 core.onEvent = { event in
     switch event {
@@ -73,6 +74,44 @@ core.onEvent = { event in
         log("• status: \(text)")
     case .conversations(let items):
         log("• conversations: \(items.count)")
+        // Tool-cost probe (#15): read the per-tool cost of real conversations
+        // through the same command path the view uses, so the render is checked
+        // against a daemon's own answer rather than a hand-written fixture.
+        if env["ADELE_TOOL_USAGE"] == "1", !toolUsageProbed {
+            toolUsageProbed = true
+            Task { @MainActor in
+                do {
+                    var reported = 0
+                    for summary in items.prefix(12) where summary.messageCount > 0 {
+                        let rows = try await core.toolUsage(conversationID: summary.id)
+                        guard !rows.isEmpty else { continue }
+                        reported += 1
+                        let report = ToolUsageReport(rows: rows, sortedBy: .tokens)
+                        log(
+                            "• \(summary.title.prefix(40)) [\(summary.id.prefix(8))]: "
+                                + "\(report.distinctTools) tools, \(report.totalCalls) calls, "
+                                + "\(report.totalTokens) tokens")
+                        for group in report.groups {
+                            log("    \(group.namespace): \(group.totalTokens) tokens, \(group.totalCalls) calls")
+                            for row in group.rows {
+                                let tier = row.tier.map { " [\($0.label)\($0.isGated ? "/gated" : "")]" } ?? ""
+                                let evicted = ToolUsageReport.evictionNote(for: row).map { " (\($0))" } ?? ""
+                                log(
+                                    "      \(row.toolName)\(tier): \(row.resultTokens) tok, "
+                                        + "\(row.callCount) calls, max \(row.maxResultBytes)B, "
+                                        + "bar \(String(format: "%.2f", report.fraction(for: row)))\(evicted)")
+                            }
+                        }
+                    }
+                    finish(0, reported > 0
+                        ? "✅ tool usage read from \(reported) conversation(s)"
+                        : "✅ command answered; no conversation in this daemon has tool calls")
+                } catch {
+                    finish(1, "❌ tool usage failed: \(error)")
+                }
+            }
+            return
+        }
     case .models(let items):
         log("• models: \(items.count)" + (items.first.map { " (e.g. \($0.connectionLabel)/\($0.model.displayName))" } ?? ""))
     case .defaultModel(let m):

@@ -202,13 +202,48 @@ import Testing
                 == ["web", "fileio"])
     }
 
-    /// A tool the daemon could not attribute to a server is still shown, under a
-    /// named bucket. Dropping it would understate the conversation's cost.
+    /// A tool that carries neither a namespace nor a namespaced name is still
+    /// shown, under a named bucket. Dropping it would understate the cost.
     @Test func anUnattributedToolGetsItsOwnGroup() throws {
-        let groups = ToolUsageReport(rows: [try usage("mystery", tokens: 5)]).groups
+        let groups = ToolUsageReport(rows: [try usage("complete_step", tokens: 5)]).groups
         #expect(groups.count == 1)
         #expect(groups.first?.namespace == ToolUsageReport.unattributedNamespace)
-        #expect(groups.first?.rows.first?.toolName == "mystery")
+        #expect(groups.first?.rows.first?.toolName == "complete_step")
+    }
+
+    /// The daemon does not fill in `namespace` today (desktop-assistant#1261),
+    /// but its own exposed name encodes it: the MCP executor builds
+    /// `format!("{}__{}", prefix, tool.name)`. So a namespaced name groups under
+    /// its server rather than collapsing the whole conversation into one bucket.
+    @Test func aNamespacedToolNameGroupsUnderItsServer() throws {
+        let groups = ToolUsageReport(rows: [
+            try usage("web__web_read", tokens: 100),
+            try usage("fileio__fileio_read_lines", tokens: 50),
+        ]).groups
+        #expect(groups.map(\.namespace) == ["web", "fileio"])
+    }
+
+    /// A tool name may carry the separator more than once. Only the first split
+    /// is the server; the rest is the tool's own name.
+    @Test func onlyTheFirstSeparatorNamesTheServer() throws {
+        let groups = ToolUsageReport(rows: [try usage("a__b__c", tokens: 1)]).groups
+        #expect(groups.first?.namespace == "a")
+    }
+
+    /// The daemon's own answer always wins, so the fallback retires itself the
+    /// day desktop-assistant#1261 lands rather than fighting it.
+    @Test func aReportedNamespaceBeatsTheNameDerivedOne() throws {
+        let groups = ToolUsageReport(rows: [
+            try usage("web__web_read", namespace: "browser", tokens: 1)
+        ]).groups
+        #expect(groups.first?.namespace == "browser")
+    }
+
+    /// A separator with nothing before it names no server, rather than an empty
+    /// group heading.
+    @Test func aLeadingSeparatorNamesNoServer() throws {
+        let groups = ToolUsageReport(rows: [try usage("__orphan", tokens: 1)]).groups
+        #expect(groups.first?.namespace == ToolUsageReport.unattributedNamespace)
     }
 
     // MARK: Header totals

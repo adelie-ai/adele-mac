@@ -253,6 +253,7 @@ private struct ConversationRow: View {
 private struct ChatPane: View {
     @Environment(AppModel.self) private var model
     @State private var showPersonality = false
+    @State private var showToolUsage = false
 
     var body: some View {
         @Bindable var model = model
@@ -306,6 +307,16 @@ private struct ChatPane: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                if model.selectedConversationID != nil {
+                    Button {
+                        showToolUsage = true
+                    } label: {
+                        Label("Tool cost", systemImage: "chart.bar.xaxis")
+                    }
+                    .help("What this conversation's tools cost it")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.showScratchpad.toggle()
                 } label: {
@@ -317,6 +328,11 @@ private struct ChatPane: View {
         .sheet(isPresented: $showPersonality) {
             if let id = model.selectedConversationID {
                 ConversationPersonalitySheet(conversationID: id)
+            }
+        }
+        .sheet(isPresented: $showToolUsage) {
+            if let id = model.selectedConversationID {
+                ToolUsageView(conversationID: id)
             }
         }
     }
