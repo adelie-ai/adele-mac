@@ -177,10 +177,90 @@ public struct McpServerRow: Sendable, Hashable, Identifiable {
     /// server name when it has none. Beyond the shared `ServerRow`, which drops
     /// it — the panel aggregates per-namespace tool counts from it.
     public let namespace: String
+    /// Display name the server declared for itself (SEP-973), already
+    /// sanitized. Read it through ``mcpDisplayName(_:)`` rather than directly,
+    /// so the fallback to ``name`` is applied the same way everywhere.
+    public let title: String?
+    /// What the server says it offers, sanitized and clamped to
+    /// ``mcpMaxDeclaredCharacters``. Suitable as a one-line subtitle.
+    public let description: String?
+    /// The server's home page, present only when it is a valid `http(s)` URL.
+    /// Safe to offer as a clickable link; still must never be opened on its own.
+    public let websiteURL: String?
 
     /// Stable across the three populations: the same name can legitimately
     /// appear as a daemon row, an external client row, and a shadowed built-in.
     public var id: String { "\(runner.rawValue)/\(kind.rawValue)/\(name)" }
+}
+
+// MARK: - Server-declared metadata
+
+/// Cap on a rendered title or description, in **Unicode scalars**.
+///
+/// A server's declared text is untrusted: it comes from whatever process the
+/// configuration points at. Long enough to be a useful subtitle, short enough
+/// that no server can push the rest of a row off screen. Matches
+/// `client-ui-common`'s `MAX_DESCRIPTION_CHARS`, which counts Rust `char`s —
+/// the same unit, so the two clients clamp the same text at the same point.
+public let mcpMaxDeclaredCharacters = 200
+
+/// Sanitize a server-declared string for display: collapse every run of
+/// whitespace (newlines and tabs included) to a single space, drop other control
+/// characters, trim, and return `nil` when nothing is left.
+///
+/// These strings are rendered in the user's UI but authored by the server, so a
+/// value full of newlines or control characters would otherwise break the row
+/// layout. The MCP spec makes the same point about tool annotations: a client
+/// treats server-supplied metadata as untrusted.
+/// The cap is a true ceiling: a separator and the scalar it precedes are
+/// admitted together or not at all, so the result never passes the limit and
+/// never ends on a separator that leads nowhere.
+///
+/// This is the one place the port does not copy `client-ui-common`'s
+/// `sanitize_declared` step for step. That function writes the pending space
+/// before it tests the cap, so a clamp landing on a word break returns
+/// `max_chars + 1` characters with a trailing space. Tracked as
+/// adelie-ai/client-ui-common#56. Matching a defect is not parity, and the
+/// difference is at most one character on a value already being truncated.
+func mcpSanitizeDeclared(_ value: String, maxScalars: Int = mcpMaxDeclaredCharacters) -> String? {
+    var out = String.UnicodeScalarView()
+    var pendingSpace = false
+    for scalar in value.unicodeScalars {
+        if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+            pendingSpace = !out.isEmpty
+            continue
+        }
+        if CharacterSet.controlCharacters.contains(scalar) { continue }
+        if out.count + (pendingSpace ? 2 : 1) > maxScalars { break }
+        if pendingSpace {
+            out.append(" ")
+            pendingSpace = false
+        }
+        out.append(scalar)
+    }
+    return out.isEmpty ? nil : String(out)
+}
+
+/// Accept a server-declared website only when it is an `http(s)` URL.
+///
+/// A hostile server offering `javascript:`, `file://` or `data:` must not become
+/// a clickable link in the user's client, and a scheme-less value is refused
+/// rather than guessed at.
+func mcpSanitizedWebsite(_ value: String) -> String? {
+    guard let url = mcpSanitizeDeclared(value) else { return nil }
+    let lower = url.lowercased()
+    guard lower.hasPrefix("http://") || lower.hasPrefix("https://") else { return nil }
+    return url
+}
+
+/// The label to show for a row: the server's declared title when it gave a
+/// usable one, else its configured ``McpServerRow/name``.
+///
+/// The real name stays the identity used in config, namespacing and error
+/// messages, so a panel showing a title must keep the name visible somewhere. A
+/// server must not be able to make its own identity unfindable.
+public func mcpDisplayName(_ row: McpServerRow) -> String {
+    row.title ?? row.name
 }
 
 // MARK: - Labels
@@ -266,7 +346,12 @@ public func mcpServerRows(
             detail: view.detail,
             kind: .fromTransport(view.transport),
             disabledReason: nil,
-            namespace: resolvedNamespace(view.namespace, name: view.name)
+            namespace: resolvedNamespace(view.namespace, name: view.name),
+            // Sanitized at the boundary, so every renderer downstream gets a
+            // value that is already safe to place in a row.
+            title: view.title.flatMap { mcpSanitizeDeclared($0) },
+            description: view.description.flatMap { mcpSanitizeDeclared($0) },
+            websiteURL: view.websiteURL.flatMap(mcpSanitizedWebsite)
         )
     }
     let clientRows = client.map { server in
@@ -279,7 +364,12 @@ public func mcpServerRows(
             detail: nil,
             kind: .fromTransport(server.transport),
             disabledReason: nil,
-            namespace: resolvedNamespace(server.namespace, name: server.name)
+            namespace: resolvedNamespace(server.namespace, name: server.name),
+            // Client-run servers have no `initialize` handshake behind them, so
+            // there is nothing they could have declared.
+            title: nil,
+            description: nil,
+            websiteURL: nil
         )
     }
     let builtinRows = builtins.map { builtin -> McpServerRow in
@@ -304,7 +394,12 @@ public func mcpServerRows(
             detail: nil,
             kind: .builtIn,
             disabledReason: reason,
-            namespace: resolvedNamespace(builtin.namespace, name: builtin.name)
+            namespace: resolvedNamespace(builtin.namespace, name: builtin.name),
+            // A built-in is compiled in rather than connected to, so it declares
+            // nothing either.
+            title: nil,
+            description: nil,
+            websiteURL: nil
         )
     }
 

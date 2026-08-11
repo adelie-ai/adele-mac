@@ -379,13 +379,36 @@ private struct McpServerRowView: View {
                 .help(mcpStatusLabel(row.status))
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
-                    Text(row.name)
+                    Text(mcpDisplayName(row))
+                    // A server that declared a title keeps its configured name
+                    // visible beside it: the name is the identity used in
+                    // config, namespacing and errors, so a server must not be
+                    // able to hide it behind a title it chose for itself.
+                    if row.title != nil {
+                        Text(row.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     Chip(text: runnerLabel)
                     Chip(text: mcpKindLabel(row.kind))
                 }
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                // What the server says it offers. Sanitized and clamped in
+                // `mcpServerRows`, and rendered as plain text like every other
+                // server-provided string on this row.
+                if let description = row.description {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                // Offered as a link, never opened on its own. Only an http(s)
+                // URL reaches here.
+                if let website = row.websiteURL, let url = URL(string: website) {
+                    Link(website, destination: url)
+                        .font(.caption)
+                }
                 if let detail = row.detail, !detail.isEmpty {
                     Text(detail)
                         .font(.caption)
