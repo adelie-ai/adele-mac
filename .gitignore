@@ -3,3 +3,6 @@
 Sources/CAdeleCore/include/adele_client_core.h
 *.xcodeproj
 .DS_Store
+
+# Agent worktrees live here; never commit them.
+.worktrees/
