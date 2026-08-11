@@ -66,6 +66,23 @@ import Testing
         McpClientServer(name: name, transport: "stdio", status: status, toolCount: 0)
     }
 
+    /// A daemon `McpServerView`, decoded from the wire shape because the type
+    /// mirrors that shape and has no memberwise init.
+    private func daemonView(_ name: String) throws -> McpServerView {
+        let fields: [String: Any] = [
+            "name": name,
+            "command": "cmd",
+            "args": [String](),
+            "enabled": true,
+            "status": "running",
+            "tool_count": 0,
+            "transport": "stdio",
+            "target": "cmd",
+        ]
+        let data = try JSONSerialization.data(withJSONObject: fields)
+        return try JSONDecoder().decode(McpServerView.self, from: data)
+    }
+
     /// An external client-run row is administrable now: the core writes the
     /// machine-wide config on this client's behalf, so the row toggles and
     /// removes rather than explaining that it cannot.
@@ -102,24 +119,37 @@ import Testing
 
     // MARK: The add form's location
 
-    /// The default is the daemon, so the form behaves as it did for anyone who
-    /// does not want a locally run server.
-    @Test func addLocationDefaultsToTheDaemon() {
-        #expect(McpAddLocation.allCases.first == .daemon)
+    /// The form opens on the location that can be used: the daemon when there is
+    /// a connection, this Mac when there is not.
+    @Test func addLocationDefaultsToWhatTheConnectionAllows() {
+        #expect(mcpDefaultAddLocation(connected: true) == .daemon)
+        #expect(mcpDefaultAddLocation(connected: false) == .client)
+        #expect(
+            mcpCanAdd(location: mcpDefaultAddLocation(connected: false), connected: false),
+            "the default location must be one the person can actually submit"
+        )
     }
 
     /// Each location says what it means for the server being added, including
     /// when it starts.
-    @Test func addFooterSaysWhatEachLocationMeans() {
-        let daemon = mcpAddFooter(location: .daemon, connected: true)
+    @Test func addFooterSaysWhatEachLocationMeans() throws {
+        let daemon = try #require(mcpAddFooter(location: .daemon, connected: true, expanded: true))
         #expect(daemon.contains("daemon"))
 
-        let client = mcpAddFooter(location: .client, connected: true)
+        let client = try #require(mcpAddFooter(location: .client, connected: true, expanded: true))
         #expect(client.lowercased().contains("this mac"))
         #expect(
             client.lowercased().contains("next"),
             "a client-run server starts on the next connection, and must say so"
         )
+    }
+
+    /// A closed form has no location to describe: the picker is not on screen,
+    /// so text about the daemon or this Mac describes a choice nobody made.
+    @Test func addFooterDescribesNoLocationWhileTheFormIsClosed() {
+        #expect(mcpAddFooter(location: .daemon, connected: false, expanded: false) == nil)
+        #expect(mcpAddFooter(location: .daemon, connected: true, expanded: false) == nil)
+        #expect(mcpAddFooter(location: .client, connected: false, expanded: false) == nil)
     }
 
     /// Adding a daemon server needs the daemon. Adding a client-run one does
@@ -132,9 +162,43 @@ import Testing
 
     /// A disconnected panel says why the daemon option cannot be used, rather
     /// than offering a button that fails.
-    @Test func addFooterExplainsADaemonAddWhileDisconnected() {
-        let text = mcpAddFooter(location: .daemon, connected: false)
+    @Test func addFooterExplainsADaemonAddWhileDisconnected() throws {
+        let text = try #require(mcpAddFooter(location: .daemon, connected: false, expanded: true))
         #expect(text.lowercased().contains("connect"))
+    }
+
+    // MARK: Did the write land
+
+    /// The panel judges an add by the population the core answered with: after
+    /// an upsert the name is defined there.
+    @Test func aLandedAddIsReadFromThePopulationTheCoreReturned() {
+        #expect(mcpClientAddError(name: "notes", in: [clientServer("notes")]) == nil)
+    }
+
+    /// A refused write answers with the population still on disk, so the panel
+    /// reports the add did not happen, and names the server.
+    @Test func aRefusedAddIsReportedAgainstTheSameName() throws {
+        let message = try #require(mcpClientAddError(name: "notes", in: []))
+        #expect(message.contains("notes"))
+    }
+
+    /// A switched-off server still counts as defined: an upsert that turns it on
+    /// landed even though the row is not running yet.
+    @Test func aLandedAddCountsAServerThatIsSwitchedOff() {
+        let off = clientServer("notes", status: "disabled")
+        #expect(mcpClientAddError(name: "notes", in: [off]) == nil)
+    }
+
+    /// Names are compared the way the core compares them, so a server that
+    /// differs only in case is not evidence the write landed.
+    @Test func aRefusedAddIsNotHiddenByACaseDifferentName() {
+        #expect(mcpClientAddError(name: "Notes", in: [clientServer("notes")]) != nil)
+    }
+
+    /// The write trims the typed name, so the check trims it too - otherwise a
+    /// successful add reads as refused.
+    @Test func theLandedCheckTrimsTheNameLikeTheWriteDoes() {
+        #expect(mcpClientAddError(name: "  notes  ", in: [clientServer("notes")]) == nil)
     }
 
     // MARK: Name collisions
@@ -169,8 +233,33 @@ import Testing
     /// populations, and the panel already sorts the pair. Adding one over the
     /// other is not an edit of it, so the note must not claim it is.
     @Test func addNoteDoesNotConfuseTheTwoPopulations() throws {
-        let rows = mcpServerRows(daemon: [], client: [clientServer("notes")], builtins: [])
-        let note = mcpAddNameNote(name: "notes", location: .daemon, rows: rows)
-        #expect(note?.lowercased().contains("replace") != true)
+        let rows = mcpServerRows(daemon: [try daemonView("notes")], client: [], builtins: [])
+        #expect(mcpAddNameNote(name: "notes", location: .client, rows: rows) == nil)
+    }
+
+    /// Every name comparison in the core is exact, so the note's must be too. A
+    /// name that differs only in case creates a separate definition: it
+    /// overrides no built-in, and edits no client-run server.
+    @Test func addNoteMatchesNamesExactlyLikeTheCore() {
+        let builtin = McpBuiltinServer(
+            name: "web", namespace: "web", toolCount: 1, overriddenBy: nil, disabledByConfig: false
+        )
+        let rows = mcpServerRows(
+            daemon: [], client: [clientServer("notes")], builtins: [builtin]
+        )
+        #expect(mcpAddNameNote(name: "Web", location: .client, rows: rows) == nil)
+        #expect(mcpAddNameNote(name: "Notes", location: .client, rows: rows) == nil)
+    }
+
+    /// A server of that name that is switched off here does not "already run
+    /// here". The add turns it back on, so the note says that instead.
+    @Test func addNoteSaysASwitchedOffServerWillBeTurnedOn() throws {
+        let rows = mcpServerRows(
+            daemon: [], client: [clientServer("notes", status: "disabled")], builtins: []
+        )
+        let note = try #require(mcpAddNameNote(name: "notes", location: .client, rows: rows))
+        #expect(note.lowercased().contains("switched off"))
+        #expect(note.lowercased().contains("turns it on"))
+        #expect(!note.lowercased().contains("already runs here"))
     }
 }
