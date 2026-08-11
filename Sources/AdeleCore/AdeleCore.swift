@@ -39,18 +39,17 @@ public final class AdeleCore: @unchecked Sendable {
     private var pendingCommands: [String: CheckedContinuation<Data, Error>] = [:]
 
     /// Callers awaiting the next built-in MCP inventory. Not keyed by request id:
-    /// the core's `mcp_builtins` event carries no correlation id because it is
-    /// also emitted unsolicited (after a toggle), and the inventory is whole-set
-    /// state rather than a per-request answer — so the next one to arrive is the
-    /// right answer for everyone waiting. Main-actor only, like `pendingCommands`.
-    private var pendingBuiltins: [CheckedContinuation<[McpBuiltinServer], Never>] = []
+    /// the core's `mcp_builtins` event carries no correlation id, because it is
+    /// also emitted of the core's own accord (after a toggle). One event answers
+    /// one caller, oldest first — see ``McpInventoryWaiters``. Main-actor only,
+    /// like `pendingCommands`.
+    private let pendingBuiltins = McpInventoryWaiters<[McpBuiltinServer]>()
 
-    /// Callers awaiting the next external client-run MCP inventory. Not keyed by
-    /// request id, for the same reason as ``pendingBuiltins``: the core's
-    /// `mcp_client_servers` event carries no correlation id and the inventory is
-    /// whole-set state, so the next one to arrive answers everyone waiting.
-    /// Main-actor only.
-    private var pendingClientServers: [CheckedContinuation<[McpClientServer], Never>] = []
+    /// Callers awaiting the next external client-run MCP inventory. Ordered the
+    /// same way as ``pendingBuiltins``, for the same reason: the core's
+    /// `mcp_client_servers` event carries no correlation id, and the core emits
+    /// exactly one per request. Main-actor only.
+    private let pendingClientServers = McpInventoryWaiters<[McpClientServer]>()
 
     public init() {
         let ctx = Unmanaged.passUnretained(self).toOpaque()
@@ -89,20 +88,16 @@ public final class AdeleCore: @unchecked Sendable {
                     return
                 }
                 if let event = try? JSONDecoder().decode(ViewEvent.self, from: data) {
-                    // The built-in inventory resolves anyone awaiting it AND is
-                    // still forwarded, so an unsolicited refresh (the core emits
-                    // one after a toggle) reaches the UI either way.
-                    if case .mcpBuiltins(_, let servers) = event, !self.pendingBuiltins.isEmpty {
-                        let waiting = self.pendingBuiltins
-                        self.pendingBuiltins.removeAll()
-                        for continuation in waiting { continuation.resume(returning: servers) }
+                    // The built-in inventory answers the caller that has waited
+                    // longest AND is still forwarded, so a refresh the core sends
+                    // of its own accord (after a toggle) reaches the UI either
+                    // way.
+                    if case .mcpBuiltins(_, let servers) = event {
+                        self.pendingBuiltins.deliver(servers)
                     }
                     // Same contract for the external client-run inventory.
-                    if case .mcpClientServers(_, let servers) = event,
-                       !self.pendingClientServers.isEmpty {
-                        let waiting = self.pendingClientServers
-                        self.pendingClientServers.removeAll()
-                        for continuation in waiting { continuation.resume(returning: servers) }
+                    if case .mcpClientServers(_, let servers) = event {
+                        self.pendingClientServers.deliver(servers)
                     }
                     self.onEvent?(event)
                 }
@@ -182,10 +177,7 @@ public final class AdeleCore: @unchecked Sendable {
     @MainActor
     public func mcpBuiltinServers() async -> [McpBuiltinServer] {
         guard let handle else { return [] }
-        return await withCheckedContinuation { continuation in
-            pendingBuiltins.append(continuation)
-            adele_core_request_mcp_builtins(handle)
-        }
+        return await pendingBuiltins.request { adele_core_request_mcp_builtins(handle) }
     }
 
     /// The external client-run MCP servers this client hosts on the edge — the
@@ -211,8 +203,9 @@ public final class AdeleCore: @unchecked Sendable {
     /// and its siblings), because the core answers all of them the same way: one
     /// `mcp_client_servers` event, carrying the state on disk. Awaiting that one
     /// event rather than issuing a separate read keeps a write from racing a
-    /// concurrent read. The event carries no correlation id, so the waiters are a
-    /// queue.
+    /// concurrent read. The event carries no correlation id, so callers form a
+    /// first-in-first-out queue: one event answers one caller, the oldest first
+    /// (``McpInventoryWaiters``).
     ///
     /// Answers `[]` with no live core, matching every other call here.
     @MainActor
@@ -220,10 +213,7 @@ public final class AdeleCore: @unchecked Sendable {
         _ request: (OpaquePointer) -> Void
     ) async -> [McpClientServer] {
         guard let handle else { return [] }
-        return await withCheckedContinuation { continuation in
-            pendingClientServers.append(continuation)
-            request(handle)
-        }
+        return await pendingClientServers.request { request(handle) }
     }
 
     /// Turn one built-in MCP server off or back on **for this client's surface**,
@@ -243,11 +233,10 @@ public final class AdeleCore: @unchecked Sendable {
     @discardableResult
     public func setMcpBuiltinDisabled(name: String, disabled: Bool) async -> [McpBuiltinServer] {
         guard let handle else { return [] }
-        return await withCheckedContinuation { continuation in
-            // No separate read request: the core emits a fresh inventory of its
-            // own accord once the write lands, so awaiting that one avoids racing
-            // a concurrent read against the write.
-            pendingBuiltins.append(continuation)
+        // No separate read request: the core emits a fresh inventory of its own
+        // accord once the write lands, so awaiting that one avoids racing a
+        // concurrent read against the write.
+        return await pendingBuiltins.request {
             adele_core_set_mcp_builtin_disabled(handle, name, disabled)
         }
     }

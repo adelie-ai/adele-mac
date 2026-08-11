@@ -354,6 +354,50 @@ import Testing
         }
     }
 
+    /// Two client-run requests in flight at once get one event each, so the
+    /// second caller is answered with the state that follows its own request.
+    ///
+    /// The inventory events carry no correlation id. A dispatch that gave every
+    /// waiter the first event would hand the delete's caller the list read
+    /// before the delete, and drop the delete's own event - so the panel would
+    /// keep a row for a server that is gone from disk.
+    @MainActor @Test func overlappingClientRequestsEachGetTheirOwnReply() async throws {
+        try await withConfigHome(
+            seed: """
+                [[servers]]
+                name = "notes"
+                command = "/usr/bin/notes-mcp"
+
+                [surfaces.mac]
+                enabled = ["notes"]
+                """
+        ) { _ in
+            let core = macCore()
+            #expect(await core.mcpClientServers().contains { $0.name == "notes" })
+
+            // Both requests are issued before either answer is handled: the two
+            // child tasks run on this main actor, ahead of the events the core
+            // posts back to it.
+            async let read = core.mcpClientServers()
+            async let deleted = core.removeMcpClientServer(name: "notes")
+            let (readAnswer, deleteAnswer) = await (read, deleted)
+
+            #expect(
+                deleteAnswer.allSatisfy { $0.name != "notes" },
+                "the delete's caller is answered by the delete's own event, not the read's"
+            )
+            #expect(
+                readAnswer.contains { $0.name == "notes" }
+                    != deleteAnswer.contains { $0.name == "notes" },
+                "one caller is answered before the delete and one after it, never both the same"
+            )
+            #expect(
+                await core.mcpClientServers().allSatisfy { $0.name != "notes" },
+                "the delete landed, so the panel's next read has no such server"
+            )
+        }
+    }
+
     /// The opt-out must also be what the core then *reports*, so the panel shows
     /// the pending state instead of looking unchanged until the next connect.
     @MainActor @Test func aDisabledBuiltinComesBackFlagged() async throws {
