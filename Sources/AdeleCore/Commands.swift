@@ -114,3 +114,33 @@ public enum AdeleCommand {
         return encode(Cmd(delete_knowledge_entry: .init(id: id)))
     }
 }
+
+// MARK: - Per-conversation tool-provenance gate (desktop-assistant#1007)
+
+extension AdeleCommand {
+    /// Build the `SetConversationToolGate` wire JSON.
+    ///
+    /// `disabled: true` turns the tool-provenance gate off for this
+    /// conversation's turns; `false` leaves it enforced, which is the daemon's
+    /// default. The daemon resolves the value fresh on every send, so a change
+    /// takes effect on the conversation's next turn.
+    ///
+    /// `disabled` is always emitted, including when false, so the daemon stores
+    /// an explicit choice rather than reading a missing key.
+    public static func setConversationToolGate(
+        conversationID: String,
+        disabled: Bool
+    ) -> String {
+        struct Payload: Encodable {
+            let conversation_id: String
+            let disabled: Bool
+        }
+        struct Wrapper: Encodable {
+            let set_conversation_tool_gate: Payload
+        }
+        return encode(
+            Wrapper(
+                set_conversation_tool_gate: Payload(
+                    conversation_id: conversationID, disabled: disabled)))
+    }
+}

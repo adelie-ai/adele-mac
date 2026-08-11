@@ -50,6 +50,26 @@ public struct ConversationDetail: Decodable, Hashable, Sendable {
     public let id: String
     public let title: String
     public let messages: [ChatMessage]
+    /// Whether the tool-provenance gate is turned off for this conversation
+    /// (desktop-assistant#1007).
+    ///
+    /// Defaults to `false` when the core does not report it, which is both the
+    /// daemon's own default and the safe reading of an unknown state. A core too
+    /// old to send the field must not fail the whole conversation load.
+    public let toolGateDisabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, messages
+        case toolGateDisabled = "tool_gate_disabled"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = try c.decode(String.self, forKey: .title)
+        messages = try c.decode([ChatMessage].self, forKey: .messages)
+        toolGateDisabled = try c.decodeIfPresent(Bool.self, forKey: .toolGateDisabled) ?? false
+    }
 }
 
 /// Context-window fill readout. All formatting (`readout`, `level`) is computed

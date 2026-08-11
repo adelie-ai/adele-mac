@@ -301,6 +301,11 @@ private struct ChatPane: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
+                if model.selectedConversationID != nil {
+                    ToolGateToggle()
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.showScratchpad.toggle()
                 } label: {

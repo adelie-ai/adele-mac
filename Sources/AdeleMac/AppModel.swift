@@ -117,6 +117,10 @@ final class AppModel {
     var queued = QueuedMessagesState()
     /// Whether the running turn can be cancelled, and by what handle (#22).
     var turn = TurnState()
+    /// Whether the tool-provenance gate is turned off for the open conversation
+    /// (#24). Re-read from each loaded conversation, never carried across a
+    /// switch.
+    var toolGateDisabled = false
 
     // Connection profiles
     var profiles: [Profile] = []
@@ -301,6 +305,27 @@ final class AppModel {
 
     var activeConversations: [ConversationSummary] { conversations.filter { !$0.archived } }
     var archivedConversations: [ConversationSummary] { conversations.filter(\.archived) }
+
+    /// Turn the tool-provenance gate off, or back on, for the open conversation
+    /// (#24).
+    ///
+    /// The control moves at once so it does not feel dead, and then adopts what
+    /// the daemon says it stored. A write that fails puts the control back and
+    /// says why, rather than leaving it claiming a state the daemon never took.
+    func setToolGateDisabled(_ disabled: Bool) {
+        guard let id = selectedConversationID else { return }
+        let previous = toolGateDisabled
+        toolGateDisabled = disabled
+        Task {
+            do {
+                toolGateDisabled = try await core.setConversationToolGate(
+                    conversationID: id, disabled: disabled)
+            } catch {
+                toolGateDisabled = previous
+                showToast("Could not change tool access: \(error.localizedDescription)")
+            }
+        }
+    }
 
     /// Stop the turn streaming into the open conversation.
     ///
@@ -609,6 +634,9 @@ final class AppModel {
 
         case .loadConversation(let detail):
             selectedConversationID = detail.id
+            // The newly-active conversation's own stored value, so the control
+            // never shows the previous conversation's state (#24).
+            toolGateDisabled = detail.toolGateDisabled
             messages = detail.messages.map {
                 DisplayMessage(id: $0.id, role: $0.role, content: $0.content, kind: $0.kind)
             }
