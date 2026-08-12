@@ -38,10 +38,11 @@ public final class AdeleCore: @unchecked Sendable {
     /// main actor (both `sendCommand` and the reply in `dispatch` run there).
     private var pendingCommands: [String: CheckedContinuation<Data, Error>] = [:]
 
-    /// Callers awaiting the next built-in MCP inventory. Not keyed by request
-    /// id: the core's `mcp_builtins` event carries no correlation id, whether it
-    /// answers a read or a toggle. One event answers one caller, oldest first:
-    /// see ``McpInventoryWaiters``. Main-actor only, like `pendingCommands`.
+    /// Callers of the built-in MCP inventory. Not keyed by request id: the
+    /// core's `mcp_builtins` event carries no correlation id, whether it answers
+    /// a read or a toggle. One request is out at a time and one event answers
+    /// one caller: see ``McpInventoryWaiters``. Main-actor only, like
+    /// `pendingCommands`.
     private let pendingBuiltins = McpInventoryWaiters<[McpBuiltinServer]>()
 
     /// Callers awaiting the next external client-run MCP inventory. Ordered the
@@ -200,10 +201,10 @@ public final class AdeleCore: @unchecked Sendable {
     /// Shared by the read and by every write (``upsertMcpClientServer(name:command:args:namespace:enabled:)``
     /// and its siblings), because the core answers all of them the same way: one
     /// `mcp_client_servers` event, carrying the state on disk. Awaiting that one
-    /// event rather than issuing a separate read keeps a write from racing a
-    /// concurrent read. The event carries no correlation id, so callers form a
-    /// first-in-first-out queue: one event answers one caller, the oldest first
-    /// (``McpInventoryWaiters``).
+    /// event rather than issuing a separate read is what lets a write's caller
+    /// read what its own write produced. The event carries no correlation id, so
+    /// ``McpInventoryWaiters`` keeps one request out at a time and answers the
+    /// callers in the order they asked.
     ///
     /// Answers `[]` with no live core, matching every other call here.
     @MainActor

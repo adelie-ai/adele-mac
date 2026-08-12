@@ -7,41 +7,76 @@ import Testing
 /// asked for it (adele-mac#34).
 ///
 /// The events carry no correlation id, so the only thing that can match a reply
-/// to a request is order. These cases pin that rule without a core: the same
-/// queue serves the client-run inventory and the built-in one.
+/// to a request is order, and only one request may be out at a time for order
+/// to mean anything. These cases pin both rules without a core: the same queue
+/// serves the client-run inventory and the built-in one.
 @Suite struct McpInventoryWaitersTests {
-    /// Two requests in flight get one event each, oldest first - so a write that
-    /// starts while a read is out is answered by its own event, not the read's.
+    /// Counts the requests that reached the core, so a test can wait for a
+    /// request to go out rather than guess at the scheduling.
+    @MainActor private final class SendLog {
+        private(set) var sent = 0
+
+        func record() { sent += 1 }
+    }
+
+    private func clientServer(_ name: String) -> McpClientServer {
+        McpClientServer(name: name, transport: "stdio", status: "enabled", toolCount: 0)
+    }
+
+    /// Two callers in the queue get one event each, oldest first - so a write
+    /// that starts while a read is out is answered by its own event.
     @MainActor @Test func overlappingRequestsEachReceiveTheirOwnReply() async {
         let waiters = McpInventoryWaiters<[McpClientServer]>()
-        let notes = McpClientServer(
-            name: "notes", transport: "stdio", status: "enabled", toolCount: 0
-        )
+        let log = SendLog()
+        let notes = clientServer("notes")
 
-        let first = Task { await waiters.request {} }
+        let first = Task { await waiters.request { log.record() } }
         while waiters.count < 1 { await Task.yield() }
-        let second = Task { await waiters.request {} }
+        let second = Task { await waiters.request { log.record() } }
         while waiters.count < 2 { await Task.yield() }
 
         waiters.deliver([notes])
+        while log.sent < 2 { await Task.yield() }
         waiters.deliver([])
 
-        #expect(await first.value == [notes], "the older caller gets the older event")
-        #expect(await second.value == [], "the newer caller gets its own event")
+        #expect(await first.value == [notes], "the older caller gets the answer to its request")
+        #expect(await second.value == [], "the newer caller gets the answer to its own")
     }
 
-    /// An event that arrives with nobody waiting is ignored, and the caller that
+    /// One request is out at a time. The core answers each request on its own
+    /// task, so a second request sent while the first is unanswered could be
+    /// answered first, and the two callers would swap answers.
+    @MainActor @Test func oneRequestIsOutAtATime() async {
+        let waiters = McpInventoryWaiters<[McpClientServer]>()
+        let log = SendLog()
+
+        let first = Task { await waiters.request { log.record() } }
+        while waiters.count < 1 { await Task.yield() }
+        let second = Task { await waiters.request { log.record() } }
+        while waiters.count < 2 { await Task.yield() }
+
+        #expect(log.sent == 1, "the second caller waits its turn rather than asking as well")
+
+        waiters.deliver([])
+        while log.sent < 2 { await Task.yield() }
+        #expect(log.sent == 2, "the answer to the first request releases the second")
+
+        waiters.deliver([])
+        _ = await first.value
+        _ = await second.value
+    }
+
+    /// An event that arrives with no request out is ignored, and the caller that
     /// asks next still gets the event its own request produces.
     @MainActor @Test func anEventWithNoWaiterIsIgnored() async {
         let waiters = McpInventoryWaiters<[McpClientServer]>()
-        let notes = McpClientServer(
-            name: "notes", transport: "stdio", status: "enabled", toolCount: 0
-        )
+        let log = SendLog()
+        let notes = clientServer("notes")
 
-        waiters.deliver([notes])  // unsolicited: the core emits these too
+        waiters.deliver([notes])
 
-        let later = Task { await waiters.request {} }
-        while waiters.count < 1 { await Task.yield() }
+        let later = Task { await waiters.request { log.record() } }
+        while log.sent < 1 { await Task.yield() }
         waiters.deliver([])
 
         #expect(await later.value == [], "the dropped event must not be held back for this caller")
@@ -52,26 +87,28 @@ import Testing
     /// the toggle's own event.
     @MainActor @Test func builtinInventoryFollowsTheSameOrder() async {
         let waiters = McpInventoryWaiters<[McpBuiltinServer]>()
+        let log = SendLog()
         let on = McpBuiltinServer(name: "web", namespace: "web", toolCount: 3)
         let off = McpBuiltinServer(
             name: "web", namespace: "web", toolCount: 3, disabledByConfig: true
         )
 
-        let read = Task { await waiters.request {} }
+        let read = Task { await waiters.request { log.record() } }
         while waiters.count < 1 { await Task.yield() }
-        let toggle = Task { await waiters.request {} }
+        let toggle = Task { await waiters.request { log.record() } }
         while waiters.count < 2 { await Task.yield() }
 
         waiters.deliver([on])
+        while log.sent < 2 { await Task.yield() }
         waiters.deliver([off])
 
         #expect(await read.value == [on])
         #expect(await toggle.value == [off], "the toggle's caller sees the state it wrote")
     }
 
-    /// The request goes out only after its caller joins the queue, so an event
-    /// can never arrive before there is a waiter for it.
-    @MainActor @Test func theRequestIsSentAfterTheCallerJoinsTheQueue() async {
+    /// The request goes out only after its caller takes the slot, so an event
+    /// can never arrive before there is a caller for it.
+    @MainActor @Test func theRequestIsSentAfterTheCallerTakesTheSlot() async {
         let waiters = McpInventoryWaiters<[McpClientServer]>()
         let counted = CountingSend(waiters: waiters)
 

@@ -59,6 +59,10 @@ struct McpSettingsView: View {
     @State private var newArgs = ""
     @State private var newNamespace = ""
     @State private var adding = false
+    /// Why the last add did not land, shown under the form's own fields. Kept
+    /// apart from the panel's `error`, which reports the list and the daemon:
+    /// this one belongs to the form, and goes when the form does.
+    @State private var addError: String?
 
     /// The merged, panel-ordered rows across all three populations.
     private var rows: [McpServerRow] {
@@ -211,6 +215,13 @@ struct McpSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // A refused write keeps the form and what was typed in it, and
+                // says so here, beside the fields the person would correct.
+                if let addError {
+                    Text(addError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
                 HStack {
                     Button("Cancel") { resetAddForm() }
                     Spacer()
@@ -333,7 +344,7 @@ struct McpSettingsView: View {
             // The core answers the write with the population it read back, so
             // the new row renders from disk rather than from an optimistic edit,
             // and the same answer says whether the write landed at all.
-            error = nil
+            addError = nil
             let written = await activeInventory.upsertClientServer(
                 name, command, parsedArgs, namespace.isEmpty ? nil : namespace, true
             )
@@ -342,7 +353,7 @@ struct McpSettingsView: View {
             // saying why. Keep the form open with what was typed in it, so the
             // person can correct the cause and try again.
             if let refused = mcpClientAddError(name: name, in: written) {
-                error = refused
+                addError = refused
             } else {
                 resetAddForm()
             }
@@ -431,9 +442,7 @@ struct McpSettingsView: View {
         newCommand = ""
         newArgs = ""
         newNamespace = ""
-        // A refusal from the last add belongs to the form that caused it, and
-        // there is nothing on screen to relate it to once the form is gone.
-        error = nil
+        addError = nil
     }
 }
 

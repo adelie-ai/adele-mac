@@ -354,17 +354,14 @@ import Testing
         }
     }
 
-    /// Two client-run requests in flight at once get one event each: one caller
-    /// is answered before the delete lands and one after it.
+    /// Two client-run requests asked for at once are each answered by their own
+    /// event: the read sees the list before the delete, the delete sees the list
+    /// after it.
     ///
     /// The inventory events carry no correlation id. A dispatch that gave every
     /// waiter the first event would hand both callers the list read before the
     /// delete, and drop the delete's own event - so the panel would keep a row
     /// for a server that is gone from disk.
-    ///
-    /// Which caller gets which answer is not asserted: the core runs each
-    /// request on its own task, so the two answers can arrive in either order.
-    /// What must hold either way is that there are two of them.
     @MainActor @Test func overlappingClientRequestsEachGetTheirOwnReply() async throws {
         try await withConfigHome(
             seed: """
@@ -379,22 +376,51 @@ import Testing
             let core = macCore()
             #expect(await core.mcpClientServers().contains { $0.name == "notes" })
 
-            // Both requests are issued before either answer is handled: the two
-            // child tasks run on this main actor, ahead of the events the core
-            // posts back to it.
+            // Both callers join the queue before either answer is handled: the
+            // two child tasks run on this main actor, ahead of the events the
+            // core posts back to it.
             async let read = core.mcpClientServers()
             async let deleted = core.removeMcpClientServer(name: "notes")
             let (readAnswer, deleteAnswer) = await (read, deleted)
 
             #expect(
-                readAnswer.contains { $0.name == "notes" }
-                    != deleteAnswer.contains { $0.name == "notes" },
-                "one caller is answered before the delete and one after it, never both the same"
+                readAnswer.contains { $0.name == "notes" },
+                "the read asked first, so it is answered with the list before the delete"
+            )
+            #expect(
+                deleteAnswer.allSatisfy { $0.name != "notes" },
+                "the delete's caller is answered by the delete's own event, not the read's"
             )
             #expect(
                 await core.mcpClientServers().allSatisfy { $0.name != "notes" },
                 "the delete landed, so the panel's next read has no such server"
             )
+        }
+    }
+
+    /// An add whose round trip overlaps a read is judged by its own answer.
+    ///
+    /// The panel reads "did the add land" out of the population the core
+    /// answers the write with. A read started inside that round trip is
+    /// answered from one file read, and the write does more work than that, so
+    /// its event can arrive first. Were the write's caller given it, the panel
+    /// would read a landed add as refused, keep the form open, and say the core
+    /// refused a write that is on disk.
+    @MainActor @Test func anAddIsJudgedByItsOwnAnswerNotAConcurrentReads() async throws {
+        try await withConfigHome { _ in
+            let core = macCore()
+
+            async let added = core.upsertMcpClientServer(
+                name: "alpha", command: "/usr/bin/alpha-mcp", args: [], namespace: nil
+            )
+            async let read = core.mcpClientServers()
+            let (addAnswer, _) = await (added, read)
+
+            #expect(
+                mcpClientAddError(name: "alpha", in: addAnswer) == nil,
+                "the add landed, so the answer it gets back must show the server"
+            )
+            #expect(await core.mcpClientServers().contains { $0.name == "alpha" })
         }
     }
 
