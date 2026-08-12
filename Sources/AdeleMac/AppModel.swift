@@ -376,15 +376,22 @@ final class AppModel {
         core.cancelTask(taskID)
     }
 
-    func send() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Send the open conversation's draft. Returns whether a message was sent.
+    ///
+    /// The answer is not decoration: the composer resets its dictation session on
+    /// a send, and that drops the words the recognizer is still holding. A caller
+    /// that assumed a send had happened would cancel a sentence out of the
+    /// recognizer that nothing received (#42).
+    @discardableResult
+    func send() -> Bool {
         // Deliberately NOT gated on `sendEnabled`: while a reply streams the core
         // QUEUES the submit rather than refusing it (#1), so the composer must
         // stay live. `sendEnabled` now only dims the button's affordance.
-        guard !text.isEmpty else { return }
+        guard let text = promptToSend(draft: draft) else { return false }
         // Clear only THIS conversation's draft — a send never touches another's.
         drafts.clear(selectedConversationID)
         core.sendPrompt(text)
+        return true
     }
 
     // MARK: - Message queue (#1)
@@ -434,9 +441,15 @@ final class AppModel {
         speaker.stop()
     }
 
-    /// Reflect the `You:` (voice-input) state for the open conversation.
-    func setVoiceIn(_ enabled: Bool) {
-        guard let id = selectedConversationID else { return }
+    /// Reflect the `You:` (voice-input) state for one conversation.
+    ///
+    /// The conversation is named by the caller instead of read from the
+    /// selection, because a dictation session outlives a conversation switch. A
+    /// session that started in A must clear A's flag when it ends, whatever is
+    /// open by then; keying off the selection turned the flag off in B and left
+    /// A showing a microphone that is no longer on.
+    func setVoiceIn(_ enabled: Bool, conversationID: String?) {
+        guard let id = conversationID else { return }
         core.setVoiceIn(conversationID: id, enabled: enabled)
     }
 

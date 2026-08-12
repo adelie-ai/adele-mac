@@ -44,3 +44,16 @@ public struct DraftStore: Equatable, Sendable {
 
     public var isEmpty: Bool { drafts.isEmpty }
 }
+
+/// The text `draft` sends, or `nil` when it holds no message.
+///
+/// One rule, one place, because two callers ask the same question and must get
+/// the same answer: the send control asks whether to offer a send, and the send
+/// path asks whether one happened. The second answer matters beyond the message:
+/// a dictation session resets on send, which drops the words the recognizer
+/// still holds, so a reset after a refused send destroys a sentence nothing
+/// received. Whitespace alone is no message.
+public func promptToSend(draft: String) -> String? {
+    let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? nil : text
+}
