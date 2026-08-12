@@ -16,13 +16,21 @@ extension AdeleCore {
     }
 
     /// Archive a conversation (hide it from the active list). Throws on failure.
+    ///
+    /// The daemon answers this with an acknowledgement and nothing else, so it
+    /// refreshes no list on its own. A caller that wants the sidebar to follow
+    /// the change uses ``AdeleCore/archiveConversation(_:)`` instead - the
+    /// core's typed entry point, which re-reads the inventory after the change
+    /// lands (adele-mac#46). This stays for a caller that wants the raw command
+    /// and will refresh itself.
     @MainActor
     public func archiveConversation(id: String) async throws {
         _ = try await sendCommand(AdeleCommand.archiveConversation(id: id))
     }
 
     /// Restore a previously archived conversation to the active list. Throws on
-    /// failure.
+    /// failure. The sibling of the archive command above, with the same caveat:
+    /// it refreshes nothing. Prefer ``AdeleCore/unarchiveConversation(_:)``.
     @MainActor
     public func unarchiveConversation(id: String) async throws {
         _ = try await sendCommand(AdeleCommand.unarchiveConversation(id: id))
