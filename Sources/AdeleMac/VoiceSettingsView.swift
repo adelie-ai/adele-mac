@@ -1,4 +1,5 @@
 import AVFoundation
+import AdeleCore
 import SwiftUI
 
 /// Voice (text-to-speech) settings: pick the system voice Adele speaks with,
@@ -52,6 +53,33 @@ struct VoiceSettingsView: View {
                 } label: {
                     Label("Preview", systemImage: "play.circle")
                 }
+            }
+
+            Section {
+                Toggle("Send after a pause", isOn: $model.dictationSendAfterSilence)
+                if model.dictationSendAfterSilence {
+                    Stepper(
+                        "Wait \(Int(model.dictationSendAfter)) seconds",
+                        value: $model.dictationSendAfter,
+                        in: DictationIdleSettings.minimumInterval...60,
+                        step: 1
+                    )
+                }
+                Toggle("Stop listening after a pause", isOn: $model.dictationStopAfterSilence)
+                if model.dictationStopAfterSilence {
+                    Stepper(
+                        "Wait \(Int(model.dictationStopAfter)) seconds",
+                        value: $model.dictationStopAfter,
+                        in: 10...600,
+                        step: 10
+                    )
+                }
+            } header: {
+                Text("Dictation")
+            } footer: {
+                Text("The microphone stays on until you switch it off. A pause can send what you dictated, and a longer one can close the microphone. Typed text alone is never sent.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

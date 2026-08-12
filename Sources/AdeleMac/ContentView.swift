@@ -529,6 +529,11 @@ private struct ComposerView: View {
     /// What was in the composer when this dictation session started. Each
     /// transcript is written on top of it, so dictation never eats typed text.
     @State private var dictationBase = ""
+    /// The current session's transcript, and when it last changed. Silence is
+    /// measured from that moment, because a recognizer streams partial results
+    /// while a person speaks and stops when they stop (#43).
+    @State private var transcript = ""
+    @State private var transcriptChangedAt = Date()
 
     var body: some View {
         @Bindable var model = model
@@ -544,6 +549,15 @@ private struct ComposerView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(dictationError ?? "")
+        }
+        // The silence clock, running only while the mic is on. Restarted by the
+        // `id`, so switching dictation off cancels it (#43).
+        .task(id: isDictating) {
+            while isDictating && !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                applyIdleAction()
+            }
         }
     }
 
@@ -625,7 +639,37 @@ private struct ComposerView: View {
     private func send() {
         model.send()
         dictationBase = dictationBaseAfterSend()
+        resetSilenceClock()
         dictation.restart()
+    }
+
+    /// Start the silence measurement over: a new session, or one whose
+    /// transcript has just been consumed by a send.
+    private func resetSilenceClock() {
+        transcript = ""
+        transcriptChangedAt = Date()
+    }
+
+    /// Apply whichever silence timer has come due (#43).
+    ///
+    /// Driven by a tick while dictating rather than by a scheduled deadline, so
+    /// changing a setting mid-session takes effect at once and no timer has to
+    /// be cancelled and rebuilt.
+    private func applyIdleAction() {
+        guard isDictating else { return }
+        let silence = Date().timeIntervalSince(transcriptChangedAt)
+        switch dictationIdleAction(
+            silence: silence,
+            hasTranscript: !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            settings: model.dictationIdleSettings
+        ) {
+        case .none:
+            return
+        case .send:
+            send()
+        case .stopListening:
+            dictation.stop()
+        }
     }
 
     private func toggleDictation() {
@@ -642,7 +686,17 @@ private struct ComposerView: View {
             // transcript replaces the one before it, on top of whatever was
             // typed before the session started.
             dictationBase = model.draft
-            dictation.onText = { model.draft = dictationDraft(base: dictationBase, transcript: $0) }
+            resetSilenceClock()
+            dictation.onText = { text in
+                model.draft = dictationDraft(base: dictationBase, transcript: text)
+                // Only a change restarts the clock: the recognizer can repeat an
+                // unchanged transcript, and counting that as speech would keep a
+                // silence from ever completing.
+                if text != transcript {
+                    transcript = text
+                    transcriptChangedAt = Date()
+                }
+            }
             dictation.onEnd = { error in
                 isDictating = false
                 model.setVoiceIn(false)
