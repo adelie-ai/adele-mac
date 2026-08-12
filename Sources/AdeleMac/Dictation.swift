@@ -4,7 +4,11 @@ import Speech
 /// Native speech-to-text dictation via `SFSpeechRecognizer` + `AVAudioEngine`.
 /// Partial transcripts stream to `onText` (main queue) as the user speaks; the
 /// caller drives the mic button and decides when to send. The Linux client uses
-/// on-device Whisper; on macOS we use Apple's on-device recognizer.
+/// on-device Whisper; macOS uses whichever recognizer the framework picks, which
+/// is not necessarily the local one: `requiresOnDeviceRecognition` is left at
+/// its default of `false`, so audio can go to Apple's servers, and server
+/// recognition is subject to a documented per-device daily limit. Both the limit
+/// and a lost network show up here as a recognizer that is not available.
 ///
 /// A recognition task reports the transcript of the **whole task**, not the
 /// words since the last callback, and it revises words it has already reported
@@ -13,6 +17,13 @@ import Speech
 /// words it already consumed. The microphone keeps running across a restart,
 /// because the mic button is a toggle and dictating several messages in a row is
 /// the point of it.
+///
+/// One task does not run forever. The framework ends a recognition task after
+/// about a minute of audio, delivering a final result, and this session ends
+/// with it - the caller sees `onEnd` with no message, as it would for a normal
+/// stop. Each ``restart()`` begins a new task and starts that clock again, so
+/// the limit is reached between messages sent more than about a minute apart,
+/// not during one of them.
 ///
 /// Requires `NSMicrophoneUsageDescription` + `NSSpeechRecognitionUsageDescription`
 /// in the app's Info.plist (see scripts/build-app.sh / run-app.sh).
@@ -71,14 +82,36 @@ final class Dictation: NSObject, @unchecked Sendable {
     /// so the next transcript begins empty rather than carrying the words that
     /// were just sent. A no-op when not recording, so a send with the microphone
     /// off costs nothing.
+    ///
+    /// The running task is dropped first, and unconditionally. A restart that
+    /// gave up before that - because the recognizer is not available at this
+    /// moment - would leave the old task running with the sent words still in
+    /// its transcript, and its next partial would write them back into the
+    /// cleared composer (adele-mac#42). Availability is transient: it drops for
+    /// the network, and it is how the daily server-recognition limit appears. So
+    /// a restart that cannot start a task ends the session with a message,
+    /// rather than leaving a mic button that records nothing.
     func restart() {
-        guard isRecording, let recognizer, recognizer.isAvailable else { return }
-        // Cancel rather than end the audio: `endAudio` asks for a final result
-        // covering the words already spoken, and those are the words just sent.
+        guard isRecording else { return }
+        invalidateTask()
+        guard let recognizer, recognizer.isAvailable else {
+            finish("Dictation stopped: speech recognition is not available right now.")
+            return
+        }
+        listen(recognizer)
+    }
+
+    /// Drop the running task and disown the callbacks it has yet to deliver.
+    ///
+    /// Cancel rather than end the audio: `endAudio` asks for a final result
+    /// covering the words already spoken, and on the send path those are the
+    /// words just sent. The session counter moves here, so a callback already in
+    /// flight is discarded on arrival.
+    private func invalidateTask() {
+        session += 1
         task?.cancel()
         task = nil
         request = nil
-        listen(recognizer)
     }
 
     func stop() { finish(nil) }
@@ -133,9 +166,7 @@ final class Dictation: NSObject, @unchecked Sendable {
             isTapped = false
         }
         request?.endAudio()
-        task?.cancel()
-        request = nil
-        task = nil
+        invalidateTask()
         isRecording = false
     }
 
