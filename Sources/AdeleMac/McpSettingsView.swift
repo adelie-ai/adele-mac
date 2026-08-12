@@ -342,7 +342,9 @@ struct McpSettingsView: View {
                 resetAddForm()
                 await reload()
             } catch {
-                self.error = "Failed to add server: \(error)"
+                // The form stays open on a failure, so its message belongs in
+                // it, beside the fields, exactly as a client-run refusal does.
+                addError = "Failed to add server: \(error)"
             }
         case .client:
             // The core answers the write with the population it read back, so

@@ -362,6 +362,10 @@ import Testing
     /// waiter the first event would hand both callers the list read before the
     /// delete, and drop the delete's own event - so the panel would keep a row
     /// for a server that is gone from disk.
+    ///
+    /// The read asks first here, which is the order the panel's Refresh button
+    /// and a row's trash produce. The write-first order is
+    /// ``anAddIsJudgedByItsOwnAnswerNotByAConcurrentRead``.
     @MainActor @Test func overlappingClientRequestsEachGetTheirOwnReply() async throws {
         try await withConfigHome(
             seed: """
