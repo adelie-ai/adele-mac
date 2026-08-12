@@ -12,22 +12,7 @@ struct ContentView: View {
                 ConnectView()
             }
         }
-        .overlay(alignment: .top) {
-            if let toast = model.toast {
-                Text(toast)
-                    .font(.callout)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .overlay(Capsule().strokeBorder(.separator))
-                    .shadow(radius: 8, y: 4)
-                    .padding(.top, 12)
-                    .frame(maxWidth: 420)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
-        .animation(.spring(duration: 0.3), value: model.toast)
+        .adeleToasts()
         .onAppear { model.autoReconnect() }
     }
 }

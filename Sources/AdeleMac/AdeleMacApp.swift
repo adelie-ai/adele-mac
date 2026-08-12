@@ -45,7 +45,12 @@ struct AdeleMacApp: App {
         }
 
         Settings {
+            // The toast surface goes inside the environment that feeds it, and
+            // the Settings scene needs one of its own: the core reports a
+            // refused write as a toast, and the MCP, connection and personality
+            // writes are all started here rather than in the main window.
             SettingsView()
+                .adeleToasts()
                 .environment(model)
         }
     }

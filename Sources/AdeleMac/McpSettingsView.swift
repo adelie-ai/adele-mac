@@ -50,6 +50,8 @@ struct McpSettingsView: View {
 
     // Add-server form.
     @State private var showingAdd = false
+    /// Set from the connection state every time the form opens, and on reset;
+    /// this value only holds while the closed form describes no location.
     @State private var newLocation: McpAddLocation = .daemon
     @State private var newName = ""
     @State private var newCommand = ""
@@ -217,6 +219,10 @@ struct McpSettingsView: View {
                 }
             } else {
                 Button {
+                    // Read the connection now, not at the last reset: the form
+                    // must open on a location that can be submitted, and this is
+                    // the first open as often as not.
+                    newLocation = mcpDefaultAddLocation(connected: model.connected)
                     showingAdd = true
                 } label: {
                     Label("Add MCP Server", systemImage: "plus")
@@ -225,9 +231,15 @@ struct McpSettingsView: View {
         } header: {
             Text("Add")
         } footer: {
-            Text(mcpAddFooter(location: newLocation, connected: model.connected))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Nothing while the form is closed: there is no picker on screen, so
+            // there is no location to describe.
+            if let footer = mcpAddFooter(
+                location: newLocation, connected: model.connected, expanded: showingAdd
+            ) {
+                Text(footer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -318,13 +330,34 @@ struct McpSettingsView: View {
             }
         case .client:
             // The core answers the write with the population it read back, so
-            // the new row renders from disk rather than from an optimistic edit.
-            // A refused write comes back as a toast plus the unchanged list.
-            clientServers = await activeInventory.upsertClientServer(
-                name, command, parsedArgs, namespace.isEmpty ? nil : namespace
+            // the new row renders from disk rather than from an optimistic edit,
+            // and the same answer says whether the write landed at all.
+            error = nil
+            let written = await activeInventory.upsertClientServer(
+                name, command, parsedArgs, namespace.isEmpty ? nil : namespace, true
             )
-            resetAddForm()
+            await applyClientWrite(written)
+            // A refused write answers with the list still on disk, plus a toast
+            // saying why. Keep the form open with what was typed in it, so the
+            // person can correct the cause and try again.
+            if let refused = mcpClientAddError(name: name, in: written) {
+                error = refused
+            } else {
+                resetAddForm()
+            }
         }
+    }
+
+    /// Take up a client-run write's answer: the population the core read back,
+    /// and a fresh built-in population beside it.
+    ///
+    /// A client-run server overrides the built-in of the same name, and the core
+    /// derives that override on every read - so an add, a toggle or a remove can
+    /// change which built-in rows render as overridden, and what each one says.
+    /// The per-namespace tool counts are computed from the same rows.
+    private func applyClientWrite(_ servers: [McpClientServer]) async {
+        clientServers = servers
+        builtinServers = await activeInventory.builtinServers()
     }
 
     /// The runner fork, both directions of it.
@@ -353,7 +386,9 @@ struct McpSettingsView: View {
             } else {
                 // This client's own selection only: another client on this Mac
                 // that lists the same server keeps running it.
-                clientServers = await activeInventory.setClientServerEnabled(row.name, enabled)
+                await applyClientWrite(
+                    await activeInventory.setClientServerEnabled(row.name, enabled)
+                )
             }
         }
     }
@@ -383,7 +418,7 @@ struct McpSettingsView: View {
         case .client:
             guard row.kind != .builtIn else { return }
             // Machine-wide: the definition goes for every client on this Mac.
-            clientServers = await activeInventory.removeClientServer(row.name)
+            await applyClientWrite(await activeInventory.removeClientServer(row.name))
         }
     }
 
@@ -391,7 +426,7 @@ struct McpSettingsView: View {
         showingAdd = false
         // Offer the location that can actually be used: while disconnected, only
         // this Mac can take a new server.
-        newLocation = model.connected ? .daemon : .client
+        newLocation = mcpDefaultAddLocation(connected: model.connected)
         newName = ""
         newCommand = ""
         newArgs = ""

@@ -100,9 +100,24 @@ public func mcpCanAdd(location: McpAddLocation, connected: Bool) -> Bool {
     }
 }
 
+/// The location the add form opens on: the one that can be used right now.
+///
+/// A daemon add needs the daemon, so while disconnected the form offers this
+/// Mac, which needs nothing. Read before the first open as well as on reset, so
+/// the panel never describes a location it will not submit.
+public func mcpDefaultAddLocation(connected: Bool) -> McpAddLocation {
+    connected ? .daemon : .client
+}
+
 /// What the add form says about the selected location: who will run the server,
-/// and when it starts.
-public func mcpAddFooter(location: McpAddLocation, connected: Bool) -> String {
+/// and when it starts. `nil` while the form is closed, because a closed form
+/// shows no location picker and so has no choice to describe.
+public func mcpAddFooter(
+    location: McpAddLocation,
+    connected: Bool,
+    expanded: Bool
+) -> String? {
+    guard expanded else { return nil }
     switch location {
     case .daemon:
         return connected
@@ -123,23 +138,44 @@ public func mcpAddFooter(location: McpAddLocation, connected: Bool) -> String {
 /// overrides it, which is how a person replaces a compiled-in server with their
 /// own; a client-run name that already exists edits that definition; and the
 /// daemon and client populations are separate, so a name may sit in both.
+///
+/// Names match exactly, the way the core matches them. A name that differs only
+/// in case is a separate definition: it overrides no built-in and replaces no
+/// server, so promising either would be false.
 public func mcpAddNameNote(
     name: String,
     location: McpAddLocation,
     rows: [McpServerRow]
 ) -> String? {
-    let trimmed = name.trimmingCharacters(in: .whitespaces).lowercased()
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
     guard !trimmed.isEmpty else { return nil }
     guard location == .client else { return nil }
 
-    let clientRows = rows.filter { $0.runner == .client && $0.name.lowercased() == trimmed }
+    let clientRows = rows.filter { $0.runner == .client && $0.name == trimmed }
     if clientRows.contains(where: { $0.kind == .builtIn }) {
         return "This name overrides the built-in server of the same name."
     }
-    if !clientRows.isEmpty {
-        return "A server of this name already runs here. Adding replaces it."
-    }
-    return nil
+    guard let existing = clientRows.first else { return nil }
+    // The add writes `enabled`, which sets both the definition's flag and this
+    // surface's membership, so an edit of a switched-off server switches it on.
+    return mcpClientRowIsOn(existing)
+        ? "A server of this name already runs here. Adding replaces it."
+        : "A server of this name is here, switched off. Adding replaces it and turns it on."
+}
+
+/// The error to show after a client-run add, or `nil` when the write landed.
+///
+/// The core answers every write with the population it read back, so the panel
+/// reads the outcome from that population instead of assuming: after an upsert
+/// the name is defined. A refused write - a config file the core cannot parse,
+/// a name held by an HTTP definition - answers with the population still on
+/// disk, and says why in its own toast.
+///
+/// The name is trimmed and matched exactly, the way the write itself treats it.
+public func mcpClientAddError(name: String, in servers: [McpClientServer]) -> String? {
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    guard !servers.contains(where: { $0.name == trimmed }) else { return nil }
+    return "Could not add \"\(trimmed)\". The core refused the write, so nothing changed."
 }
 
 // MARK: - The write calls
