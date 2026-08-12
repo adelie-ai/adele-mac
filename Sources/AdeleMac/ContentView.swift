@@ -534,6 +534,16 @@ private struct ComposerView: View {
     /// captured copy of the view saw it. The reference never changes, so the
     /// question does not arise.
     @State private var session = DictationSession()
+    /// Typing waiting to be adopted, once the person stops for a moment.
+    ///
+    /// Non-nil means the composer holds text the session has not taken as its
+    /// base yet, so the transcript must not be written over it.
+    @State private var pendingRebase: Task<Void, Never>?
+
+    /// How long the composer waits for typing to stop before it adopts what was
+    /// typed. Longer than the gap between two keystrokes, and short enough that
+    /// the words spoken next still land after the typed text.
+    private static let typingQuietPeriod = Duration.milliseconds(500)
 
     var body: some View {
         @Bindable var model = model
@@ -550,8 +560,32 @@ private struct ComposerView: View {
             // the draft of the conversation it was dictated into (#7).
             stopDictation()
         }
+        .onDisappear {
+            // The composer is drawn only while a conversation is open, so
+            // deleting that conversation or switching connection profile removes
+            // this view outright. A removed view's body is not evaluated again,
+            // so the change of selected conversation above never reaches it, and
+            // the session would outlive the composer: the voice-input flag would
+            // stay set on a conversation with no microphone behind it, and the
+            // recognition task would run to its own end (#48).
+            stopDictation()
+        }
+        .onChange(of: model.composerWritesFromCore) { _, _ in
+            // A recalled queued message and a prompt restored after a failure
+            // each arrive as one event carrying the whole text. There is no
+            // burst to wait out, and the words are needed as the base before the
+            // next transcript lands, so they rebase at once (#47).
+            rebaseNow()
+        }
         .onChange(of: model.draft) { _, text in
-            adoptExternalComposerText(text)
+            scheduleRebase(triggeredBy: text)
+        }
+        .onChange(of: model.dictationIdleSettings) { _, _ in
+            // A setting changed mid-session must not fire against quiet that was
+            // already banked: turning "send after a pause" on after twenty
+            // seconds of silence must not send at once.
+            guard isDictating else { return }
+            session.restartSilenceClock(at: SuspendingClock.now)
         }
         .alert("Dictation", isPresented: Binding(
             get: { dictationError != nil },
@@ -560,6 +594,15 @@ private struct ComposerView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(dictationError ?? "")
+        }
+        // The silence tick, running only while the mic is on. Restarted by the
+        // `id`, so switching dictation off cancels it (#43).
+        .task(id: isDictating) {
+            while isDictating && !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled else { return }
+                applyIdleAction()
+            }
         }
     }
 
@@ -645,7 +688,11 @@ private struct ComposerView: View {
     /// case where Return arrives in the beat before the first partial.
     private func send() {
         guard model.send() else { return }
-        session.consumeOnSend()
+        // The send took the typed text with it, so there is nothing left to
+        // adopt. A wait left armed here would hold the next transcript out of
+        // the composer until it expired.
+        cancelPendingRebase()
+        session.consumeOnSend(at: SuspendingClock.now)
         dictation.restart()
     }
 
@@ -662,11 +709,76 @@ private struct ComposerView: View {
         dictation.restart()
     }
 
-    /// Stop a running session. `Dictation` reports the end through `onEnd`, which
-    /// clears the button, the flag and the session.
+    /// Wait for typing to stop, then adopt what was typed.
+    ///
+    /// A rebase has to restart the recognizer, because the transcript is
+    /// cumulative: the running task still holds the words the new base carries,
+    /// and they would land a second time. One restart per keystroke drops the
+    /// audio around each one and spends a recognition request on each one, so a
+    /// typed sentence spends about forty of them and dictation is dead while the
+    /// person types (#47). Waiting for the keyboard to go quiet turns a burst of
+    /// keystrokes into one rebase.
+    private func scheduleRebase(triggeredBy text: String) {
+        guard isDictating, session.conversationID == model.selectedConversationID else { return }
+        // The wait starts again from this keystroke, and it is dropped outright
+        // when the composer already reads as the session would write it. Leaving
+        // it armed there would hold the next transcript out of the composer for
+        // no reason.
+        cancelPendingRebase()
+        // The session's own transcripts come through here too, and they are not
+        // external text.
+        guard text != session.composerText else { return }
+        pendingRebase = Task {
+            try? await Task.sleep(for: Self.typingQuietPeriod)
+            guard !Task.isCancelled else { return }
+            pendingRebase = nil
+            // The draft as it reads now, not as it read when the burst started:
+            // everything typed since is part of the same base.
+            adoptExternalComposerText(model.draft)
+        }
+    }
+
+    /// Adopt the composer text now, dropping any wait for typing to stop.
+    private func rebaseNow() {
+        cancelPendingRebase()
+        adoptExternalComposerText(model.draft)
+    }
+
+    /// Stop waiting for typing to stop, and let transcripts reach the composer
+    /// again.
+    private func cancelPendingRebase() {
+        pendingRebase?.cancel()
+        pendingRebase = nil
+    }
+
+    /// Stop a running session, and stop waiting for typing with it. `Dictation`
+    /// reports the end through `onEnd`, which clears the button, the flag and
+    /// the session.
     private func stopDictation() {
+        cancelPendingRebase()
         guard isDictating else { return }
         dictation.stop()
+    }
+
+    /// Apply whichever silence timer has come due (#43).
+    ///
+    /// Driven by a tick while dictating rather than by a scheduled deadline, so
+    /// a changed setting takes effect at once and no timer has to be cancelled
+    /// and rebuilt on every transcript.
+    private func applyIdleAction() {
+        guard isDictating else { return }
+        switch dictationIdleAction(
+            silence: session.silence(now: SuspendingClock.now),
+            hasTranscript: session.hasTranscript,
+            settings: model.dictationIdleSettings
+        ) {
+        case .none:
+            return
+        case .send:
+            send()
+        case .stopListening:
+            stopDictation()
+        }
     }
 
     private func toggleDictation() {
@@ -682,16 +794,38 @@ private struct ComposerView: View {
             // Dictation adds to the composer rather than taking it over: each
             // transcript replaces the one before it, on top of whatever was in
             // the composer when the session started.
-            session.begin(base: model.draft, conversationID: model.selectedConversationID)
+            session.begin(
+                base: model.draft,
+                conversationID: model.selectedConversationID,
+                at: SuspendingClock.now
+            )
             // Written to the session's own conversation, never to the selected
             // one: a transcript that arrives in the moment between a conversation
             // switch and the session ending belongs to the conversation it was
             // spoken into.
             dictation.onText = { text in
-                model.drafts[session.conversationID] = session.receive(transcript: text)
+                let composer = session.receive(transcript: text, at: SuspendingClock.now)
+                // Typing that is still waiting to be adopted owns the composer.
+                // This transcript sits on a base from before it, so writing it
+                // now would delete the characters just typed; the rebase takes
+                // them as the new base instead, and drops this transcript.
+                guard pendingRebase == nil else { return }
+                model.drafts[session.conversationID] = composer
+            }
+            dictation.onRollover = { finalTranscript in
+                // One recognition task hit the framework's limit and another
+                // took its place. The words heard so far move into the base,
+                // where the new task's transcript adds to them rather than
+                // replacing them.
+                let composer = session.commitOnTaskRollover(
+                    finalTranscript: finalTranscript
+                )
+                guard pendingRebase == nil else { return }
+                model.drafts[session.conversationID] = composer
             }
             dictation.onEnd = { error in
                 isDictating = false
+                cancelPendingRebase()
                 model.setVoiceIn(false, conversationID: session.conversationID)
                 session.end()
                 if let error { dictationError = error }

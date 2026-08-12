@@ -88,6 +88,33 @@ final class AppModel {
         didSet { UserDefaults.standard.set(speechPitch, forKey: "speechPitch") }
     }
 
+    // Hands-free dictation (#43): the mic button is a toggle, so a session
+    // outlives any one message. A short silence can send what was dictated, and
+    // a longer one closes a microphone left on. Persisted like the voice
+    // preferences above; the decision they feed is `dictationIdleAction`.
+    var dictationSendAfterSilence = DictationIdleSettings.standard.sendAfterSilence {
+        didSet { UserDefaults.standard.set(dictationSendAfterSilence, forKey: "dictationSendAfterSilence") }
+    }
+    var dictationSendAfter = DictationIdleSettings.standard.sendAfter {
+        didSet { UserDefaults.standard.set(dictationSendAfter, forKey: "dictationSendAfter") }
+    }
+    var dictationStopAfterSilence = DictationIdleSettings.standard.stopAfterSilence {
+        didSet { UserDefaults.standard.set(dictationStopAfterSilence, forKey: "dictationStopAfterSilence") }
+    }
+    var dictationStopAfter = DictationIdleSettings.standard.stopAfter {
+        didSet { UserDefaults.standard.set(dictationStopAfter, forKey: "dictationStopAfter") }
+    }
+
+    /// The two silence timers as the composer reads them.
+    var dictationIdleSettings: DictationIdleSettings {
+        DictationIdleSettings(
+            sendAfterSilence: dictationSendAfterSilence,
+            sendAfter: dictationSendAfter,
+            stopAfterSilence: dictationStopAfterSilence,
+            stopAfter: dictationStopAfter
+        )
+    }
+
     // Privacy: "Share device info with the assistant" (#549). Persisted locally;
     // every change is staged on the core, which applies it when the next
     // (re)connect builds its config — the Privacy settings tab says so.
@@ -112,6 +139,15 @@ final class AppModel {
         get { drafts[selectedConversationID] }
         set { drafts[selectedConversationID] = newValue }
     }
+    /// How many times the core has written the composer, rather than a person
+    /// typing into it.
+    ///
+    /// A recalled queued message (`composer_text`) and a prompt restored after a
+    /// failure (`retry_prompt`) each arrive as one event with the whole text. A
+    /// running dictation session must rebase on them at once, so it counts them
+    /// here instead of waiting out the pause that coalesces typing (#47). The
+    /// number itself means nothing; only that it changed.
+    private(set) var composerWritesFromCore = 0
     /// The open conversation's message queue (#1), replaced wholesale by each
     /// `queued_messages` event.
     var queued = QueuedMessagesState()
@@ -159,6 +195,18 @@ final class AppModel {
         }
         if defaults.object(forKey: "speechPitch") != nil {
             speechPitch = defaults.double(forKey: "speechPitch")
+        }
+        if defaults.object(forKey: "dictationSendAfterSilence") != nil {
+            dictationSendAfterSilence = defaults.bool(forKey: "dictationSendAfterSilence")
+        }
+        if defaults.object(forKey: "dictationSendAfter") != nil {
+            dictationSendAfter = defaults.double(forKey: "dictationSendAfter")
+        }
+        if defaults.object(forKey: "dictationStopAfterSilence") != nil {
+            dictationStopAfterSilence = defaults.bool(forKey: "dictationStopAfterSilence")
+        }
+        if defaults.object(forKey: "dictationStopAfter") != nil {
+            dictationStopAfter = defaults.double(forKey: "dictationStopAfter")
         }
 
         // Stage the persisted "share device info" choice on the core before the
@@ -731,6 +779,7 @@ final class AppModel {
             // message loads here, and an enqueue / cancelled edit clears it. Only
             // ever the OPEN conversation's draft.
             drafts[selectedConversationID] = text
+            composerWritesFromCore += 1
 
         case .queuedMessages(let messages, let editing):
             queued = QueuedMessagesState(messages: messages, editing: editing)
@@ -743,6 +792,7 @@ final class AppModel {
             // over text typed while waiting.
             if let restored = TurnState.composerAfterRetryOffer(text, composer: draft) {
                 draft = restored
+                composerWritesFromCore += 1
             }
 
         case .chunk(let text):
