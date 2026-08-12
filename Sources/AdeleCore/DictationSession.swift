@@ -121,7 +121,9 @@ public final class DictationSession {
     ///
     /// `finalTranscript` is the last transcript the task delivers as it stops,
     /// where it revises words it already reported. It replaces the live
-    /// transcript, and `nil` keeps the live one.
+    /// transcript. A transcript that is missing or blank is no revision at all,
+    /// and it leaves the live one alone: taking it as one would delete the words
+    /// the person is looking at, a minute into dictating.
     ///
     /// The silence clock does not move. The task ended because it reached its
     /// own limit, and a revision of words already spoken is not new speech. A
@@ -129,7 +131,10 @@ public final class DictationSession {
     /// on time, not a minute later.
     @discardableResult
     public func commitOnTaskRollover(finalTranscript: String?) -> String {
-        if let finalTranscript { transcript = finalTranscript }
+        if let finalTranscript,
+           !finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            transcript = finalTranscript
+        }
         carriedDictation = hasTranscript
         base = composerText
         transcript = ""

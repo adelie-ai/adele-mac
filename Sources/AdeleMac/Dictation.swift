@@ -1,4 +1,5 @@
 import AVFoundation
+import AdeleCore
 import Speech
 
 /// Native speech-to-text dictation via `SFSpeechRecognizer` + `AVAudioEngine`.
@@ -28,8 +29,9 @@ import Speech
 /// therefore rolls the session over rather than ending it: ``onRollover`` tells
 /// the caller to bank the transcript it holds, and a new task starts on the same
 /// microphone. The mic button, the composer text and the session stay as they
-/// are. Three things end a session instead: a stop the person asked for, an
-/// error, and a recognizer that is not available when a new task is started.
+/// are. What does end a session: a stop the person asked for, a recognition
+/// error, a microphone or a recognizer that cannot be started, and a recognizer
+/// that is not available when a new task is started.
 ///
 /// Requires `NSMicrophoneUsageDescription` + `NSSpeechRecognitionUsageDescription`
 /// in the app's Info.plist (see scripts/build-app.sh / run-app.sh).
@@ -186,24 +188,24 @@ final class Dictation: NSObject, @unchecked Sendable {
                 // transcript it was replaced for; delivering it would put the
                 // sent words back in the composer.
                 guard self.session == session else { return }
-                if let message {
-                    if let text { self.onText?(text) }
-                    // An error ends the session, and says why.
-                    self.finish(message)
-                } else if isFinal {
-                    // A final result nobody asked for: the framework's own limit
-                    // on one task, not a stop. A stop the person asked for goes
-                    // through `stop()`, which drops this task and moves the
-                    // session counter, so the final result it asks for is
-                    // discarded by the guard above and never reaches here.
-                    //
-                    // The text goes to `onRollover` rather than to `onText`. It
-                    // revises words already reported, and delivering it as new
-                    // speech would restart the caller's silence clock at the
-                    // moment the microphone was due to close.
-                    self.rollOverTask(finalTranscript: text)
-                } else if let text {
+                // Which callback is speech, which is the end of the task, and
+                // which is the end of the session is decided in `AdeleCore`,
+                // where a test can reach it. A stop the person asked for never
+                // arrives here at all: `stop()` drops its task and moves the
+                // session counter, so the final result it asks for is discarded
+                // by the guard above.
+                switch dictationTaskEvent(
+                    transcript: text, isFinal: isFinal, errorMessage: message
+                ) {
+                case .speech(let text):
                     self.onText?(text)
+                case .rollover(let finalTranscript):
+                    self.rollOverTask(finalTranscript: finalTranscript)
+                case .end(let text, let message):
+                    if let text { self.onText?(text) }
+                    self.finish(message)
+                case .nothing:
+                    break
                 }
             }
         }

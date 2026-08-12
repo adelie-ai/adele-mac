@@ -75,7 +75,8 @@ struct VoiceSettingsView: View {
                     )
                     // The stop wait gives way to the send wait, so say the
                     // number in force whenever it is not the one set above.
-                    if model.dictationIdleSettings.stopAfter > model.dictationStopAfter {
+                    if model.dictationSendAfterSilence,
+                       model.dictationIdleSettings.stopAfter > model.dictationStopAfter {
                         Text("The microphone waits \(Int(model.dictationIdleSettings.stopAfter)) seconds while it can still send, so the send happens first.")
                             .font(.caption)
                             .foregroundStyle(.secondary)

@@ -163,13 +163,23 @@ import Testing
         #expect(session.silence(now: t0.advanced(by: .seconds(70))) == 60)
     }
 
-    /// A task that heard nothing still banks nothing, whichever way the final
-    /// transcript is empty.
-    @Test func anEmptyFinalTranscriptBanksNothing() {
+    /// A task that heard nothing banks nothing.
+    @Test func anEmptyFinalTranscriptAfterNoSpeechBanksNothing() {
         let session = DictationSession()
         session.begin(base: "meeting notes:", conversationID: "c1", at: t0)
         #expect(session.commitOnTaskRollover(finalTranscript: "") == "meeting notes:")
         #expect(!session.hasTranscript)
+    }
+
+    /// An empty final transcript is no revision at all, so it leaves the words
+    /// the task already reported alone. Taking it as a revision would delete
+    /// what the person is looking at, a minute into dictating.
+    @Test func anEmptyFinalTranscriptDoesNotEraseTheWordsAlreadyHeard() {
+        let session = DictationSession()
+        session.begin(base: "notes:", conversationID: "c1", at: t0)
+        session.receive(transcript: "call Priya", at: t0)
+        #expect(session.commitOnTaskRollover(finalTranscript: "   ") == "notes: call Priya")
+        #expect(session.hasTranscript)
     }
 
     /// The next task starts an empty transcript, so what the last one heard has
