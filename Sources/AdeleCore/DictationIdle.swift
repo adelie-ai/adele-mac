@@ -24,12 +24,19 @@ public struct DictationIdleSettings: Sendable, Hashable {
     /// Seconds of silence before the microphone closes.
     public let stopAfter: TimeInterval
 
-    /// The shortest interval either timer will use.
+    /// The shortest interval the send timer will use.
     ///
-    /// An interval of zero or less would fire on every tick, sending a word at a
-    /// time and making dictation unusable; a stored setting is raised to this
-    /// rather than trusted.
-    public static let minimumInterval: TimeInterval = 1
+    /// A person stops inside a sentence to find the next word, and a pause of
+    /// about a second is an ordinary one. Sending on it cuts the message in
+    /// half, which is what the floor exists to prevent; a stored setting is
+    /// raised to this rather than trusted.
+    public static let minimumSendInterval: TimeInterval = 2
+
+    /// The shortest interval the stop timer will use.
+    ///
+    /// An interval of zero or less would fire on every tick, closing the
+    /// microphone the moment it opened.
+    public static let minimumStopInterval: TimeInterval = 1
 
     /// Sending is opt-in; closing an abandoned microphone is not.
     public static let standard = DictationIdleSettings(
@@ -42,10 +49,15 @@ public struct DictationIdleSettings: Sendable, Hashable {
         stopAfterSilence: Bool,
         stopAfter: TimeInterval
     ) {
+        let send = max(sendAfter, Self.minimumSendInterval)
+        let stop = max(stopAfter, Self.minimumStopInterval)
         self.sendAfterSilence = sendAfterSilence
-        self.sendAfter = max(sendAfter, Self.minimumInterval)
+        self.sendAfter = send
         self.stopAfterSilence = stopAfterSilence
-        self.stopAfter = max(stopAfter, Self.minimumInterval)
+        // A microphone that closes before the send is due makes auto-send
+        // unreachable, and nothing on screen says why. Sending is the action the
+        // person asked for, so the stop interval gives way to it.
+        self.stopAfter = sendAfterSilence ? max(stop, send) : stop
     }
 }
 

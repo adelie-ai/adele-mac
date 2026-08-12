@@ -61,7 +61,7 @@ struct VoiceSettingsView: View {
                     Stepper(
                         "Wait \(Int(model.dictationSendAfter)) seconds",
                         value: $model.dictationSendAfter,
-                        in: DictationIdleSettings.minimumInterval...60,
+                        in: DictationIdleSettings.minimumSendInterval...60,
                         step: 1
                     )
                 }
@@ -77,7 +77,7 @@ struct VoiceSettingsView: View {
             } header: {
                 Text("Dictation")
             } footer: {
-                Text("The microphone stays on until you switch it off. A pause can send what you dictated, and a longer one can close the microphone. Typed text alone is never sent.")
+                Text("The microphone stays on until you switch it off. A pause can send what you dictated, and a longer one can close the microphone. Typed text alone is never sent. The microphone never closes before a pending send, so a stop shorter than the send wait waits for the send.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

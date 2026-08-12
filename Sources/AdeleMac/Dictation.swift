@@ -6,9 +6,11 @@ import Speech
 /// caller drives the mic button and decides when to send. The Linux client uses
 /// on-device Whisper; macOS uses whichever recognizer the framework picks, which
 /// is not necessarily the local one: `requiresOnDeviceRecognition` is left at
-/// its default of `false`, so audio can go to Apple's servers, and server
-/// recognition is subject to a documented per-device daily limit. Both the limit
-/// and a lost network show up here as a recognizer that is not available.
+/// its default of `false`, so audio can go to Apple's servers. Apple states two
+/// limits on recognition requests, and scopes neither of them to the server: a
+/// device may do only so many recognitions in a day, and an app that makes too
+/// many requests can be throttled as a whole. Both limits, and a lost network,
+/// show up here as a recognizer that is not available.
 ///
 /// A recognition task reports the transcript of the **whole task**, not the
 /// words since the last callback, and it revises words it has already reported
@@ -18,12 +20,15 @@ import Speech
 /// because the mic button is a toggle and dictating several messages in a row is
 /// the point of it.
 ///
-/// One task does not run forever. The framework ends a recognition task after
-/// about a minute of audio, delivering a final result, and this session ends
-/// with it - the caller sees `onEnd` with no message, as it would for a normal
-/// stop. Each ``restart()`` begins a new task and starts that clock again, so
-/// the limit is reached between messages sent more than about a minute apart,
-/// not during one of them.
+/// One task does not run forever. Apple documents a limit of about a minute of
+/// audio, after which the task stops; what it delivers as it stops is not
+/// documented, and in practice a final result arrives. The limit is on the task,
+/// not on the session, so it is reached in the middle of a sentence as readily
+/// as between two messages. A final result that the caller did not ask for
+/// therefore rolls the session over rather than ending it: ``onRollover`` tells
+/// the caller to bank the transcript it holds, and a new task starts on the same
+/// microphone. The mic button, the composer text and the session stay as they
+/// are. Only a stop the person asked for, or an error, ends the session.
 ///
 /// Requires `NSMicrophoneUsageDescription` + `NSSpeechRecognitionUsageDescription`
 /// in the app's Info.plist (see scripts/build-app.sh / run-app.sh).
@@ -44,6 +49,13 @@ final class Dictation: NSObject, @unchecked Sendable {
 
     /// Latest transcript (main queue).
     var onText: ((String) -> Void)?
+    /// One recognition task reached the framework's limit and another begins in
+    /// its place (main queue). The session is not over.
+    ///
+    /// The caller must bank the transcript it holds: the next task reports its
+    /// own transcript from empty, and the words of the task that ended are not
+    /// in it.
+    var onRollover: (() -> Void)?
     /// Recording ended (main queue); non-nil message on error.
     var onEnd: ((String?) -> Void)?
 
@@ -82,17 +94,41 @@ final class Dictation: NSObject, @unchecked Sendable {
     /// so the next transcript begins empty rather than carrying the words that
     /// were just sent. A no-op when not recording, so a send with the microphone
     /// off costs nothing.
-    ///
-    /// The running task is dropped first, and unconditionally. A restart that
-    /// gave up before that - because the recognizer is not available at this
-    /// moment - would leave the old task running with the sent words still in
-    /// its transcript, and its next partial would write them back into the
-    /// cleared composer (adele-mac#42). Availability is transient: it drops for
-    /// the network, and it is how the daily server-recognition limit appears. So
-    /// a restart that cannot start a task ends the session with a message,
-    /// rather than leaving a mic button that records nothing.
     func restart() {
         guard isRecording else { return }
+        renewTask()
+    }
+
+    /// The framework ended the task on its own; keep the session and start
+    /// another task in its place.
+    ///
+    /// A task stops after about a minute of audio, so this arrives while the
+    /// person is still dictating and has asked for nothing. Ending the session
+    /// here would close a microphone that was left open deliberately, and the
+    /// longer silence timer could never reach an interval past that minute. The
+    /// caller banks the final transcript first, because the next task reports
+    /// its own from empty.
+    private func rollOverTask() {
+        guard isRecording else { return }
+        onRollover?()
+        renewTask()
+    }
+
+    /// Drop the running task and point a new one at the same microphone.
+    ///
+    /// Cancel rather than end the audio: `endAudio` asks for a final result
+    /// covering the words already spoken, and on the send path those are the
+    /// words just sent.
+    ///
+    /// The old task goes first, and unconditionally. Giving up before that -
+    /// because the recognizer is not available at this moment - would leave it
+    /// running with the sent words still in its transcript, and its next partial
+    /// would write them back into the cleared composer (adele-mac#42).
+    /// Availability is transient: it drops for the network, and it is how the
+    /// request limits appear. So a renewal that cannot start a task ends the
+    /// session with a message, rather than leaving a mic button that records
+    /// nothing.
+    private func renewTask() {
         invalidateTask()
         guard let recognizer, recognizer.isAvailable else {
             finish("Dictation stopped: speech recognition is not available right now.")
@@ -103,10 +139,8 @@ final class Dictation: NSObject, @unchecked Sendable {
 
     /// Drop the running task and disown the callbacks it has yet to deliver.
     ///
-    /// Cancel rather than end the audio: `endAudio` asks for a final result
-    /// covering the words already spoken, and on the send path those are the
-    /// words just sent. The session counter moves here, so a callback already in
-    /// flight is discarded on arrival.
+    /// The session counter moves here, so a callback already in flight is
+    /// discarded on arrival.
     private func invalidateTask() {
         session += 1
         task?.cancel()
@@ -147,8 +181,17 @@ final class Dictation: NSObject, @unchecked Sendable {
                 // sent words back in the composer.
                 guard self.session == session else { return }
                 if let text { self.onText?(text) }
-                if isFinal { self.finish(nil) }
-                if let message { self.finish(message) }
+                if let message {
+                    // An error ends the session, and says why.
+                    self.finish(message)
+                } else if isFinal {
+                    // A final result nobody asked for: the framework's own limit
+                    // on one task, not a stop. A stop the person asked for goes
+                    // through `stop()`, which drops this task and moves the
+                    // session counter, so the final result it asks for is
+                    // discarded by the guard above and never reaches here.
+                    self.rollOverTask()
+                }
             }
         }
     }
