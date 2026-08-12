@@ -15,10 +15,10 @@ import Foundation
 /// drops the write's own event (adele-mac#34).
 ///
 /// What this does not promise: the core runs each request on its own task, so
-/// a slow write and a fast read that are in flight together can be answered in
-/// the other order, and each caller then takes up the other's answer. Both
-/// answers are read from the same file, and every request is still answered
-/// exactly once, so the panel settles on the state on disk.
+/// two requests in flight together can be answered in the other order, and each
+/// caller then takes up the other's answer. Every request is still answered
+/// exactly once. Pairing an answer to its own request needs a correlation id on
+/// the event, which is adele-mac#39.
 ///
 /// Main-actor only, like the rest of the core's reply bookkeeping: requests are
 /// issued on the main actor and events are delivered there.

@@ -30,9 +30,9 @@ struct McpInventory: Sendable {
     /// Answers with the refreshed client-run population.
     ///
     /// `enabled` sets both grains at once: the definition's own flag and this
-    /// client's surface membership. It is carried rather than defaulted, because
-    /// an edit of a switched-off server would otherwise turn it on with nothing
-    /// saying so.
+    /// client's surface membership. The caller states it rather than leaning on
+    /// the core's default, because an edit of a switched-off server turns it on,
+    /// and the panel says so in the add form's note before the write.
     var upsertClientServer: @Sendable (_ name: String, _ command: String, _ args: [String],
         _ namespace: String?, _ enabled: Bool) async -> [McpClientServer]
     /// Delete an external client-run definition, for every client on the machine.

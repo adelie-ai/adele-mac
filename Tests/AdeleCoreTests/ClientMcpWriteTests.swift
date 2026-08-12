@@ -62,8 +62,10 @@ import Testing
 
     // MARK: What a client-run row offers
 
-    private func clientServer(_ name: String, status: String = "enabled") -> McpClientServer {
-        McpClientServer(name: name, transport: "stdio", status: status, toolCount: 0)
+    private func clientServer(
+        _ name: String, status: String = "enabled", transport: String = "stdio"
+    ) -> McpClientServer {
+        McpClientServer(name: name, transport: transport, status: status, toolCount: 0)
     }
 
     /// A daemon `McpServerView`, decoded from the wire shape because the type
@@ -189,6 +191,16 @@ import Testing
         #expect(mcpClientAddError(name: "notes", in: [off]) == nil)
     }
 
+    /// The core refuses to write this form's stdio server over a definition that
+    /// reaches its server over HTTP. That name is still in the population it
+    /// answers with, so a check that only looked for the name would read the
+    /// refusal as a success and throw away what was typed.
+    @Test func aRefusedAddOverAnHttpDefinitionIsReported() throws {
+        let endpoint = clientServer("notes", transport: "http")
+        let message = try #require(mcpClientAddError(name: "notes", in: [endpoint]))
+        #expect(message.contains("notes"))
+    }
+
     /// Names are compared the way the core compares them, so a server that
     /// differs only in case is not evidence the write landed.
     @Test func aRefusedAddIsNotHiddenByACaseDifferentName() {
@@ -249,6 +261,17 @@ import Testing
         )
         #expect(mcpAddNameNote(name: "Web", location: .client, rows: rows) == nil)
         #expect(mcpAddNameNote(name: "Notes", location: .client, rows: rows) == nil)
+    }
+
+    /// The core refuses to write a stdio server over an HTTP definition, so the
+    /// note must not offer that edit as if it will happen.
+    @Test func addNoteSaysAnHttpDefinitionCannotBeEditedHere() throws {
+        let rows = mcpServerRows(
+            daemon: [], client: [clientServer("notes", transport: "http")], builtins: []
+        )
+        let note = try #require(mcpAddNameNote(name: "notes", location: .client, rows: rows))
+        #expect(note.lowercased().contains("http"))
+        #expect(!note.lowercased().contains("replaces it"))
     }
 
     /// A server of that name that is switched off here does not "already run

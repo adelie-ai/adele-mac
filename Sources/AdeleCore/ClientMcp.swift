@@ -7,8 +7,9 @@ import Foundation
 // The core owns that file. Every Adele client on the machine reads the same one,
 // so a second parser or writer here would be a correctness hazard for all of
 // them; Swift asks the core for an edit and renders whatever the core reads back.
-// This file holds the payload builder, the three write calls, and the pure form
-// logic the panel needs (location, footer wording, name notes).
+// This file holds the payload builder, the three write calls, the pure form
+// logic the panel needs (location, footer wording, name notes), and the check
+// that reads a write's outcome out of the population the core answered with.
 //
 // Not here: the daemon fleet, which is administered over the daemon command
 // channel (`Management+Mcp.swift`), and the built-in opt-out, which the core
@@ -156,6 +157,13 @@ public func mcpAddNameNote(
         return "This name overrides the built-in server of the same name."
     }
     guard let existing = clientRows.first else { return nil }
+    // This form writes a stdio server. The core refuses to apply it over a
+    // definition that reaches its server over HTTP, because that would drop the
+    // endpoint and the authentication with it.
+    if existing.kind == .http {
+        return "A server of this name here uses http. This form writes stdio servers, "
+            + "so the core refuses the add."
+    }
     // The add writes `enabled`, which sets both the definition's flag and this
     // surface's membership, so an edit of a switched-off server switches it on.
     return mcpClientRowIsOn(existing)
@@ -167,14 +175,20 @@ public func mcpAddNameNote(
 ///
 /// The core answers every write with the population it read back, so the panel
 /// reads the outcome from that population instead of assuming: after an upsert
-/// the name is defined. A refused write - a config file the core cannot parse,
-/// a name held by an HTTP definition - answers with the population still on
-/// disk, and says why in its own toast.
+/// the name is defined there as a stdio server, which is the only kind this form
+/// writes. A name still held by an HTTP definition is one the core refused, and
+/// so is a name that is absent - a config file the core could not parse leaves
+/// the population exactly as it was.
 ///
 /// The name is trimmed and matched exactly, the way the write itself treats it.
+///
+/// One refusal this cannot see: a write over an existing stdio definition of the
+/// same name that fails while it saves. The population then reads the same
+/// before and after. The core's own toast reports it.
 public func mcpClientAddError(name: String, in servers: [McpClientServer]) -> String? {
     let trimmed = name.trimmingCharacters(in: .whitespaces)
-    guard !servers.contains(where: { $0.name == trimmed }) else { return nil }
+    let landed = servers.contains { $0.name == trimmed && $0.transport != "http" }
+    guard !landed else { return nil }
     return "Could not add \"\(trimmed)\". The core refused the write, so nothing changed."
 }
 

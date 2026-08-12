@@ -50,8 +50,9 @@ struct McpSettingsView: View {
 
     // Add-server form.
     @State private var showingAdd = false
-    /// Set from the connection state every time the form opens, and on reset;
-    /// this value only holds while the closed form describes no location.
+    /// Set from the connection state every time the form opens. The closed form
+    /// shows no picker and describes no location, so nothing reads this before
+    /// the first open.
     @State private var newLocation: McpAddLocation = .daemon
     @State private var newName = ""
     @State private var newCommand = ""
@@ -422,15 +423,17 @@ struct McpSettingsView: View {
         }
     }
 
+    /// Close the add form and empty it. The location is not set here: the open
+    /// button reads it from the connection, which is the only moment it is shown.
     private func resetAddForm() {
         showingAdd = false
-        // Offer the location that can actually be used: while disconnected, only
-        // this Mac can take a new server.
-        newLocation = mcpDefaultAddLocation(connected: model.connected)
         newName = ""
         newCommand = ""
         newArgs = ""
         newNamespace = ""
+        // A refusal from the last add belongs to the form that caused it, and
+        // there is nothing on screen to relate it to once the form is gone.
+        error = nil
     }
 }
 
