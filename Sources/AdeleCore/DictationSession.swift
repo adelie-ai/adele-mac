@@ -35,11 +35,13 @@ public final class DictationSession {
     /// and the stop timer exists to close a microphone nobody speaks into.
     ///
     /// The instant comes from a clock that only counts forward, not from a
-    /// `Date`. A wall clock can step - a time-server correction, a manual change
-    /// - and a step forward fires a timer early while a step back stalls it. Of
-    /// the two monotonic clocks this is the suspending one, which does not count
-    /// time while the machine sleeps: a sleeping machine hears nothing, so that
-    /// time is not a silence the person let pass, and counting it would send a
+    /// `Date`. A wall clock can step, for a time-server correction or a manual
+    /// change. A step forward then fires a timer early, and a step back stalls
+    /// it.
+    ///
+    /// Of the two monotonic clocks this is the suspending one, which does not
+    /// count time while the machine sleeps. A sleeping machine hears nothing, so
+    /// that time is not a silence the person let pass. Counting it would send a
     /// half-dictated message on the first tick after a wake.
     ///
     /// The caller supplies the instant rather than the session reading a clock,
@@ -59,11 +61,13 @@ public final class DictationSession {
         lastChangeAt.duration(to: now).seconds
     }
 
-    /// Whether anything has actually been dictated in this session.
+    /// Whether this session has dictated words that are not sent yet.
     ///
     /// A silence timer that sends asks this, so that typed text alone is never
     /// sent by a pause. It counts the words a task rollover banked as well as
-    /// the ones the live task holds.
+    /// the ones the live task holds. A send empties it, and so does composer
+    /// text this session did not write, because the words it stood for have
+    /// gone.
     public var hasTranscript: Bool {
         carriedDictation || !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -106,18 +110,30 @@ public final class DictationSession {
         lastChangeAt = now
     }
 
-    /// One recognition task ended and the next begins: keep its words.
+    /// One recognition task ended and the next begins: keep its words, and
+    /// answer with the composer text.
     ///
     /// A task stops on its own after about a minute of audio. The person asked
     /// for nothing, so the session continues, but the next task reports a
     /// transcript of its own from empty. The words heard so far therefore move
     /// into the base, where the next transcript adds to them instead of
-    /// replacing them. The composer text does not change, and neither does the
-    /// silence clock: a rollover is not speech.
-    public func commitOnTaskRollover() {
+    /// replacing them.
+    ///
+    /// `finalTranscript` is the last transcript the task delivers as it stops,
+    /// where it revises words it already reported. It replaces the live
+    /// transcript, and `nil` keeps the live one.
+    ///
+    /// The silence clock does not move. The task ended because it reached its
+    /// own limit, and a revision of words already spoken is not new speech. A
+    /// person who stopped talking ten seconds in must have the microphone close
+    /// on time, not a minute later.
+    @discardableResult
+    public func commitOnTaskRollover(finalTranscript: String?) -> String {
+        if let finalTranscript { transcript = finalTranscript }
         carriedDictation = hasTranscript
         base = composerText
         transcript = ""
+        return base
     }
 
     /// Adopt composer text that this session did not write, and report whether

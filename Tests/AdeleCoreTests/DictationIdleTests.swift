@@ -126,10 +126,14 @@ import Testing
     /// An interval of zero or less would fire on every tick; the floor keeps a
     /// mistyped setting from making dictation unusable.
     @Test func aStopIntervalBelowTheFloorIsRaisedToIt() {
-        let silly = DictationIdleSettings(
+        let zero = DictationIdleSettings(
+            sendAfterSilence: false, sendAfter: 5, stopAfterSilence: true, stopAfter: 0
+        )
+        let negative = DictationIdleSettings(
             sendAfterSilence: false, sendAfter: 5, stopAfterSilence: true, stopAfter: -3
         )
-        #expect(silly.stopAfter == DictationIdleSettings.minimumStopInterval)
+        #expect(zero.stopAfter == DictationIdleSettings.minimumStopInterval)
+        #expect(negative.stopAfter == DictationIdleSettings.minimumStopInterval)
     }
 
     /// A microphone that closes before the send is due makes auto-send

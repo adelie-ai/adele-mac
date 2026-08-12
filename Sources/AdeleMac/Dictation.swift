@@ -21,14 +21,15 @@ import Speech
 /// the point of it.
 ///
 /// One task does not run forever. Apple documents a limit of about a minute of
-/// audio, after which the task stops; what it delivers as it stops is not
-/// documented, and in practice a final result arrives. The limit is on the task,
+/// audio, after which the task stops. What the task delivers as it stops is not
+/// documented. In practice a final result arrives. The limit is on the task,
 /// not on the session, so it is reached in the middle of a sentence as readily
 /// as between two messages. A final result that the caller did not ask for
 /// therefore rolls the session over rather than ending it: ``onRollover`` tells
 /// the caller to bank the transcript it holds, and a new task starts on the same
 /// microphone. The mic button, the composer text and the session stay as they
-/// are. Only a stop the person asked for, or an error, ends the session.
+/// are. Three things end a session instead: a stop the person asked for, an
+/// error, and a recognizer that is not available when a new task is started.
 ///
 /// Requires `NSMicrophoneUsageDescription` + `NSSpeechRecognitionUsageDescription`
 /// in the app's Info.plist (see scripts/build-app.sh / run-app.sh).
@@ -52,10 +53,15 @@ final class Dictation: NSObject, @unchecked Sendable {
     /// One recognition task reached the framework's limit and another begins in
     /// its place (main queue). The session is not over.
     ///
-    /// The caller must bank the transcript it holds: the next task reports its
-    /// own transcript from empty, and the words of the task that ended are not
-    /// in it.
-    var onRollover: (() -> Void)?
+    /// The argument is the last transcript of the task that ended, where it
+    /// revises words it already reported through ``onText``. It arrives here
+    /// rather than through ``onText`` because it is a revision of words already
+    /// spoken, not new speech, and the caller measures a silence from the last
+    /// speech.
+    ///
+    /// The caller must bank it: the next task reports its own transcript from
+    /// empty, and the words of the task that ended are not in it.
+    var onRollover: ((String?) -> Void)?
     /// Recording ended (main queue); non-nil message on error.
     var onEnd: ((String?) -> Void)?
 
@@ -108,17 +114,17 @@ final class Dictation: NSObject, @unchecked Sendable {
     /// longer silence timer could never reach an interval past that minute. The
     /// caller banks the final transcript first, because the next task reports
     /// its own from empty.
-    private func rollOverTask() {
+    private func rollOverTask(finalTranscript: String?) {
         guard isRecording else { return }
-        onRollover?()
+        onRollover?(finalTranscript)
         renewTask()
     }
 
     /// Drop the running task and point a new one at the same microphone.
     ///
-    /// Cancel rather than end the audio: `endAudio` asks for a final result
-    /// covering the words already spoken, and on the send path those are the
-    /// words just sent.
+    /// The old task is cancelled, not asked to finish. `endAudio` would ask it
+    /// for a final result covering the words already spoken, and on the send
+    /// path those are the words just sent.
     ///
     /// The old task goes first, and unconditionally. Giving up before that -
     /// because the recognizer is not available at this moment - would leave it
@@ -180,8 +186,8 @@ final class Dictation: NSObject, @unchecked Sendable {
                 // transcript it was replaced for; delivering it would put the
                 // sent words back in the composer.
                 guard self.session == session else { return }
-                if let text { self.onText?(text) }
                 if let message {
+                    if let text { self.onText?(text) }
                     // An error ends the session, and says why.
                     self.finish(message)
                 } else if isFinal {
@@ -190,7 +196,14 @@ final class Dictation: NSObject, @unchecked Sendable {
                     // through `stop()`, which drops this task and moves the
                     // session counter, so the final result it asks for is
                     // discarded by the guard above and never reaches here.
-                    self.rollOverTask()
+                    //
+                    // The text goes to `onRollover` rather than to `onText`. It
+                    // revises words already reported, and delivering it as new
+                    // speech would restart the caller's silence clock at the
+                    // moment the microphone was due to close.
+                    self.rollOverTask(finalTranscript: text)
+                } else if let text {
+                    self.onText?(text)
                 }
             }
         }

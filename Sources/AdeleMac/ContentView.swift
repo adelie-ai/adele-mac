@@ -578,7 +578,7 @@ private struct ComposerView: View {
             rebaseNow()
         }
         .onChange(of: model.draft) { _, text in
-            scheduleRebase(for: text)
+            scheduleRebase(triggeredBy: text)
         }
         .onChange(of: model.dictationIdleSettings) { _, _ in
             // A setting changed mid-session must not fire against quiet that was
@@ -595,7 +595,7 @@ private struct ComposerView: View {
         } message: {
             Text(dictationError ?? "")
         }
-        // The silence clock, running only while the mic is on. Restarted by the
+        // The silence tick, running only while the mic is on. Restarted by the
         // `id`, so switching dictation off cancels it (#43).
         .task(id: isDictating) {
             while isDictating && !Task.isCancelled {
@@ -688,6 +688,10 @@ private struct ComposerView: View {
     /// case where Return arrives in the beat before the first partial.
     private func send() {
         guard model.send() else { return }
+        // The send took the typed text with it, so there is nothing left to
+        // adopt. A wait left armed here would hold the next transcript out of
+        // the composer until it expired.
+        cancelPendingRebase()
         session.consumeOnSend(at: SuspendingClock.now)
         dictation.restart()
     }
@@ -714,12 +718,16 @@ private struct ComposerView: View {
     /// typed sentence spends about forty of them and dictation is dead while the
     /// person types (#47). Waiting for the keyboard to go quiet turns a burst of
     /// keystrokes into one rebase.
-    private func scheduleRebase(for text: String) {
+    private func scheduleRebase(triggeredBy text: String) {
         guard isDictating, session.conversationID == model.selectedConversationID else { return }
+        // The wait starts again from this keystroke, and it is dropped outright
+        // when the composer already reads as the session would write it. Leaving
+        // it armed there would hold the next transcript out of the composer for
+        // no reason.
+        cancelPendingRebase()
         // The session's own transcripts come through here too, and they are not
         // external text.
         guard text != session.composerText else { return }
-        pendingRebase?.cancel()
         pendingRebase = Task {
             try? await Task.sleep(for: Self.typingQuietPeriod)
             guard !Task.isCancelled else { return }
@@ -732,16 +740,22 @@ private struct ComposerView: View {
 
     /// Adopt the composer text now, dropping any wait for typing to stop.
     private func rebaseNow() {
-        pendingRebase?.cancel()
-        pendingRebase = nil
+        cancelPendingRebase()
         adoptExternalComposerText(model.draft)
     }
 
-    /// Stop a running session. `Dictation` reports the end through `onEnd`, which
-    /// clears the button, the flag and the session.
-    private func stopDictation() {
+    /// Stop waiting for typing to stop, and let transcripts reach the composer
+    /// again.
+    private func cancelPendingRebase() {
         pendingRebase?.cancel()
         pendingRebase = nil
+    }
+
+    /// Stop a running session, and stop waiting for typing with it. `Dictation`
+    /// reports the end through `onEnd`, which clears the button, the flag and
+    /// the session.
+    private func stopDictation() {
+        cancelPendingRebase()
         guard isDictating else { return }
         dictation.stop()
     }
@@ -798,17 +812,20 @@ private struct ComposerView: View {
                 guard pendingRebase == nil else { return }
                 model.drafts[session.conversationID] = composer
             }
-            dictation.onRollover = {
+            dictation.onRollover = { finalTranscript in
                 // One recognition task hit the framework's limit and another
                 // took its place. The words heard so far move into the base,
                 // where the new task's transcript adds to them rather than
                 // replacing them.
-                session.commitOnTaskRollover()
+                let composer = session.commitOnTaskRollover(
+                    finalTranscript: finalTranscript
+                )
+                guard pendingRebase == nil else { return }
+                model.drafts[session.conversationID] = composer
             }
             dictation.onEnd = { error in
                 isDictating = false
-                pendingRebase?.cancel()
-                pendingRebase = nil
+                cancelPendingRebase()
                 model.setVoiceIn(false, conversationID: session.conversationID)
                 session.end()
                 if let error { dictationError = error }

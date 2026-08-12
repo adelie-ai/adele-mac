@@ -122,6 +122,7 @@ import Testing
         #expect(session.base == "")
         #expect(session.transcript == "")
         #expect(session.conversationID == nil)
+        #expect(!session.hasTranscript)
     }
 
     // MARK: A task rollover
@@ -134,10 +135,41 @@ import Testing
         let session = DictationSession()
         session.begin(base: "notes:", conversationID: "c1", at: t0)
         session.receive(transcript: "the first minute of words", at: t0)
-        session.commitOnTaskRollover()
-        #expect(session.composerText == "notes: the first minute of words")
+        #expect(session.commitOnTaskRollover(finalTranscript: nil) == "notes: the first minute of words")
         #expect(session.base == "notes: the first minute of words")
         #expect(session.transcript == "")
+    }
+
+    /// The task delivers a last transcript as it stops, and it revises words it
+    /// reported before. That revision is what the session banks.
+    @Test func aTaskRolloverBanksTheFinalTranscriptRatherThanTheLastPartial() {
+        let session = DictationSession()
+        session.begin(base: "notes:", conversationID: "c1", at: t0)
+        session.receive(transcript: "call pre", at: t0)
+        #expect(session.commitOnTaskRollover(finalTranscript: "call Priya") == "notes: call Priya")
+        #expect(session.base == "notes: call Priya")
+        #expect(session.transcript == "")
+    }
+
+    /// The final transcript is a revision of words already spoken, not new
+    /// speech, so it does not restart the silence clock either. A person who
+    /// stopped talking at ten seconds must have the microphone close on time,
+    /// not a minute later when the task reaches its own limit.
+    @Test func aFinalTranscriptAtATaskRolloverDoesNotRestartTheSilenceClock() {
+        let session = DictationSession()
+        session.begin(base: "", conversationID: "c1", at: t0)
+        session.receive(transcript: "call pre", at: t0.advanced(by: .seconds(10)))
+        _ = session.commitOnTaskRollover(finalTranscript: "call Priya")
+        #expect(session.silence(now: t0.advanced(by: .seconds(70))) == 60)
+    }
+
+    /// A task that heard nothing still banks nothing, whichever way the final
+    /// transcript is empty.
+    @Test func anEmptyFinalTranscriptBanksNothing() {
+        let session = DictationSession()
+        session.begin(base: "meeting notes:", conversationID: "c1", at: t0)
+        #expect(session.commitOnTaskRollover(finalTranscript: "") == "meeting notes:")
+        #expect(!session.hasTranscript)
     }
 
     /// The next task starts an empty transcript, so what the last one heard has
@@ -147,7 +179,7 @@ import Testing
         let session = DictationSession()
         session.begin(base: "", conversationID: "c1", at: t0)
         session.receive(transcript: "the first minute of words", at: t0)
-        session.commitOnTaskRollover()
+        _ = session.commitOnTaskRollover(finalTranscript: nil)
         #expect(
             session.receive(transcript: "and the next", at: t0)
                 == "the first minute of words and the next"
@@ -160,7 +192,7 @@ import Testing
         let session = DictationSession()
         session.begin(base: "", conversationID: "c1", at: t0)
         session.receive(transcript: "book the flight", at: t0.advanced(by: .seconds(2)))
-        session.commitOnTaskRollover()
+        _ = session.commitOnTaskRollover(finalTranscript: nil)
         #expect(session.silence(now: t0.advanced(by: .seconds(62))) == 60)
     }
 
@@ -170,7 +202,7 @@ import Testing
         let session = DictationSession()
         session.begin(base: "", conversationID: "c1", at: t0)
         session.receive(transcript: "book the flight", at: t0)
-        session.commitOnTaskRollover()
+        _ = session.commitOnTaskRollover(finalTranscript: nil)
         #expect(session.hasTranscript)
     }
 
@@ -179,7 +211,7 @@ import Testing
     @Test func aTaskRolloverWithNothingHeardBanksNothing() {
         let session = DictationSession()
         session.begin(base: "meeting notes:", conversationID: "c1", at: t0)
-        session.commitOnTaskRollover()
+        _ = session.commitOnTaskRollover(finalTranscript: nil)
         #expect(!session.hasTranscript)
         #expect(session.composerText == "meeting notes:")
     }
@@ -190,7 +222,7 @@ import Testing
         let session = DictationSession()
         session.begin(base: "", conversationID: "c1", at: t0)
         session.receive(transcript: "book the flight", at: t0)
-        session.commitOnTaskRollover()
+        _ = session.commitOnTaskRollover(finalTranscript: nil)
         session.consumeOnSend(at: t0)
         #expect(session.composerText == "")
         #expect(!session.hasTranscript)
@@ -202,7 +234,7 @@ import Testing
         let session = DictationSession()
         session.begin(base: "", conversationID: "c1", at: t0)
         session.receive(transcript: "book the flight", at: t0)
-        session.commitOnTaskRollover()
+        _ = session.commitOnTaskRollover(finalTranscript: nil)
         #expect(session.rebaseIfExternal(composer: "typed instead"))
         #expect(!session.hasTranscript)
         #expect(session.composerText == "typed instead")
@@ -278,6 +310,8 @@ import Testing
         session.begin(base: "notes:", conversationID: "c1", at: t0)
         session.receive(transcript: "book the flight", at: t0)
         session.restartSilenceClock(at: t0.advanced(by: .seconds(21)))
+        #expect(session.transcript == "book the flight")
+        #expect(session.base == "notes:")
         #expect(session.composerText == "notes: book the flight")
         #expect(session.hasTranscript)
     }

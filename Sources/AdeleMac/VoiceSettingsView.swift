@@ -73,11 +73,18 @@ struct VoiceSettingsView: View {
                         in: 10...600,
                         step: 10
                     )
+                    // The stop wait gives way to the send wait, so say the
+                    // number in force whenever it is not the one set above.
+                    if model.dictationIdleSettings.stopAfter > model.dictationStopAfter {
+                        Text("The microphone waits \(Int(model.dictationIdleSettings.stopAfter)) seconds while it can still send, so the send happens first.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             } header: {
                 Text("Dictation")
             } footer: {
-                Text("The microphone stays on until you switch it off. A pause can send what you dictated, and a longer one can close the microphone. Typed text alone is never sent. The microphone never closes before a pending send, so a stop shorter than the send wait waits for the send.")
+                Text("The microphone stays on until you switch it off. A pause can send what you dictated, and a longer one can close the microphone. Typed text alone is never sent.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
