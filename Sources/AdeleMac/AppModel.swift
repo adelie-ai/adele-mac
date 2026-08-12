@@ -295,12 +295,21 @@ final class AppModel {
         Task { try? await core.renameConversation(id: id, title: trimmed) }
     }
 
+    /// Archive a conversation, through the core's typed entry point.
+    ///
+    /// Not the daemon-command bridge: that answers with an acknowledgement and
+    /// refreshes nothing, so the sidebar kept showing an archived conversation
+    /// as active until something else reloaded the list (#46). The typed call
+    /// performs the change and re-reads the list, so the refreshed inventory
+    /// arrives on its own - the same way a delete already worked. A failure
+    /// arrives as an error event and is shown, rather than being swallowed by a
+    /// discarded `try?`.
     func archiveConversation(_ id: String) {
-        Task { try? await core.archiveConversation(id: id) }
+        core.archiveConversation(id)
     }
 
     func unarchiveConversation(_ id: String) {
-        Task { try? await core.unarchiveConversation(id: id) }
+        core.unarchiveConversation(id)
     }
 
     var activeConversations: [ConversationSummary] { conversations.filter { !$0.archived } }
