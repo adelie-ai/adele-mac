@@ -38,11 +38,10 @@ public final class AdeleCore: @unchecked Sendable {
     /// main actor (both `sendCommand` and the reply in `dispatch` run there).
     private var pendingCommands: [String: CheckedContinuation<Data, Error>] = [:]
 
-    /// Callers awaiting the next built-in MCP inventory. Not keyed by request id:
-    /// the core's `mcp_builtins` event carries no correlation id, because it is
-    /// also emitted of the core's own accord (after a toggle). One event answers
-    /// one caller, oldest first — see ``McpInventoryWaiters``. Main-actor only,
-    /// like `pendingCommands`.
+    /// Callers awaiting the next built-in MCP inventory. Not keyed by request
+    /// id: the core's `mcp_builtins` event carries no correlation id, whether it
+    /// answers a read or a toggle. One event answers one caller, oldest first:
+    /// see ``McpInventoryWaiters``. Main-actor only, like `pendingCommands`.
     private let pendingBuiltins = McpInventoryWaiters<[McpBuiltinServer]>()
 
     /// Callers awaiting the next external client-run MCP inventory. Ordered the
@@ -89,9 +88,8 @@ public final class AdeleCore: @unchecked Sendable {
                 }
                 if let event = try? JSONDecoder().decode(ViewEvent.self, from: data) {
                     // The built-in inventory answers the caller that has waited
-                    // longest AND is still forwarded, so a refresh the core sends
-                    // of its own accord (after a toggle) reaches the UI either
-                    // way.
+                    // longest AND is still forwarded, so the inventory a toggle
+                    // writes reaches the UI as well as the caller.
                     if case .mcpBuiltins(_, let servers) = event {
                         self.pendingBuiltins.deliver(servers)
                     }

@@ -5,14 +5,20 @@ import Foundation
 ///
 /// The core's `mcp_builtins` and `mcp_client_servers` events carry no
 /// correlation id, so an event cannot name the caller it answers. The core does
-/// emit exactly one event per request, so arrival order is request order: each
-/// event resolves exactly one caller, the oldest first. An event that arrives
-/// with nobody waiting - the core also emits an inventory of its own accord -
-/// is ignored, and leaves any later waiter in place.
+/// emit exactly one event per request - a read and a write are answered the
+/// same way - so order is what pairs the two: each event answers exactly one
+/// caller, the oldest first. An event that arrives with nobody waiting is
+/// ignored, and leaves any later caller waiting for its own.
 ///
-/// Resolving every waiter with one event instead would give each caller the
-/// first answer to arrive, which for a write is the state before its own write
-/// (adele-mac#34).
+/// Answering every caller with one event instead gives them all the first
+/// answer to arrive, which for a write is the state before that write, and
+/// drops the write's own event (adele-mac#34).
+///
+/// What this does not promise: the core runs each request on its own task, so
+/// a slow write and a fast read that are in flight together can be answered in
+/// the other order, and each caller then takes up the other's answer. Both
+/// answers are read from the same file, and every request is still answered
+/// exactly once, so the panel settles on the state on disk.
 ///
 /// Main-actor only, like the rest of the core's reply bookkeeping: requests are
 /// issued on the main actor and events are delivered there.
