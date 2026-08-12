@@ -526,6 +526,9 @@ private struct ComposerView: View {
     @State private var dictation = Dictation()
     @State private var isDictating = false
     @State private var dictationError: String?
+    /// What was in the composer when this dictation session started. Each
+    /// transcript is written on top of it, so dictation never eats typed text.
+    @State private var dictationBase = ""
 
     var body: some View {
         @Bindable var model = model
@@ -556,7 +559,7 @@ private struct ComposerView: View {
                     // Return sends; Shift+Return inserts a newline. Never gated on
                     // the streaming state — a send mid-reply is QUEUED (#1).
                     if press.modifiers.contains(.shift) { return .ignored }
-                    model.send()
+                    send()
                     return .handled
                 }
                 .onKeyPress(keys: [.upArrow, .downArrow, .escape]) { press in
@@ -597,7 +600,7 @@ private struct ComposerView: View {
                 .help("Stop this reply")
             }
             Button {
-                model.send()
+                send()
             } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 26))
@@ -612,6 +615,19 @@ private struct ComposerView: View {
         .padding(12)
     }
 
+    /// Send the composer, and start the dictation transcript over.
+    ///
+    /// The recognizer holds every word since its task began, so a send has to
+    /// consume the transcript as well as the text. Without this the next
+    /// transcript arrives carrying the words just sent and writes them back into
+    /// the cleared composer (adele-mac#42). The microphone keeps running, so
+    /// dictating several messages in a row works.
+    private func send() {
+        model.send()
+        dictationBase = dictationBaseAfterSend()
+        dictation.restart()
+    }
+
     private func toggleDictation() {
         if isDictating {
             dictation.stop()
@@ -622,7 +638,11 @@ private struct ComposerView: View {
                 dictationError = "Microphone and Speech Recognition permission are required. Grant them in System Settings → Privacy & Security."
                 return
             }
-            dictation.onText = { model.draft = $0 }  // stream into the composer
+            // Dictation adds to the composer rather than taking it over: each
+            // transcript replaces the one before it, on top of whatever was
+            // typed before the session started.
+            dictationBase = model.draft
+            dictation.onText = { model.draft = dictationDraft(base: dictationBase, transcript: $0) }
             dictation.onEnd = { error in
                 isDictating = false
                 model.setVoiceIn(false)
