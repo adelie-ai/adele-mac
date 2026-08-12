@@ -260,6 +260,25 @@ public final class AdeleCore: @unchecked Sendable {
         adele_core_delete_conversation(handle, conversationID)
     }
 
+    /// Archive a conversation, and let the core refresh the sidebar.
+    ///
+    /// The core performs the change and then re-reads the conversation list, so
+    /// the refreshed inventory arrives as a `conversations` event with no second
+    /// call - the same shape as ``deleteConversation(_:)``. The daemon-command
+    /// route in `Management+Conversations` still works, but it answers with an
+    /// acknowledgement and refreshes nothing, which is why the sidebar used to
+    /// keep showing an archived conversation as active (adele-mac#46).
+    public func archiveConversation(_ conversationID: String) {
+        guard let handle else { return }
+        adele_core_archive_conversation(handle, conversationID)
+    }
+
+    /// Bring an archived conversation back, refreshing the sidebar the same way.
+    public func unarchiveConversation(_ conversationID: String) {
+        guard let handle else { return }
+        adele_core_unarchive_conversation(handle, conversationID)
+    }
+
     public func setVoiceIn(conversationID: String, enabled: Bool) {
         guard let handle else { return }
         adele_core_set_voice_in(handle, conversationID, enabled)
