@@ -50,12 +50,19 @@ struct McpSettingsView: View {
 
     // Add-server form.
     @State private var showingAdd = false
+    /// Set from the connection state every time the form opens. The closed form
+    /// shows no picker and describes no location, so nothing reads this before
+    /// the first open.
     @State private var newLocation: McpAddLocation = .daemon
     @State private var newName = ""
     @State private var newCommand = ""
     @State private var newArgs = ""
     @State private var newNamespace = ""
     @State private var adding = false
+    /// Why the last add did not land, shown under the form's own fields. Kept
+    /// apart from the panel's `error`, which reports the list and the daemon:
+    /// this one belongs to the form, and goes when the form does.
+    @State private var addError: String?
 
     /// The merged, panel-ordered rows across all three populations.
     private var rows: [McpServerRow] {
@@ -197,6 +204,9 @@ struct McpSettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .help("Choose whether the daemon or this Mac runs the new server")
+                // The last refusal was about the other location, so it says
+                // nothing about the one now selected.
+                .onChange(of: newLocation) { addError = nil }
                 TextField("Name", text: $newName)
                 TextField("Command", text: $newCommand)
                 TextField("Arguments (space or comma separated)", text: $newArgs)
@@ -208,6 +218,13 @@ struct McpSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                // A refused write keeps the form and what was typed in it, and
+                // says so here, beside the fields the person would correct.
+                if let addError {
+                    Text(addError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
                 HStack {
                     Button("Cancel") { resetAddForm() }
                     Spacer()
@@ -217,6 +234,10 @@ struct McpSettingsView: View {
                 }
             } else {
                 Button {
+                    // Read the connection now, not at the last reset: the form
+                    // must open on a location that can be submitted, and this is
+                    // the first open as often as not.
+                    newLocation = mcpDefaultAddLocation(connected: model.connected)
                     showingAdd = true
                 } label: {
                     Label("Add MCP Server", systemImage: "plus")
@@ -225,9 +246,15 @@ struct McpSettingsView: View {
         } header: {
             Text("Add")
         } footer: {
-            Text(mcpAddFooter(location: newLocation, connected: model.connected))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            // Nothing while the form is closed: there is no picker on screen, so
+            // there is no location to describe.
+            if let footer = mcpAddFooter(
+                location: newLocation, connected: model.connected, expanded: showingAdd
+            ) {
+                Text(footer)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -298,6 +325,7 @@ struct McpSettingsView: View {
     private func add() async {
         adding = true
         defer { adding = false }
+        addError = nil
         let name = newName.trimmingCharacters(in: .whitespaces)
         let command = newCommand.trimmingCharacters(in: .whitespaces)
         let namespace = newNamespace.trimmingCharacters(in: .whitespaces)
@@ -314,17 +342,39 @@ struct McpSettingsView: View {
                 resetAddForm()
                 await reload()
             } catch {
-                self.error = "Failed to add server: \(error)"
+                // The form stays open on a failure, so its message belongs in
+                // it, beside the fields, exactly as a client-run refusal does.
+                addError = "Failed to add server: \(error)"
             }
         case .client:
             // The core answers the write with the population it read back, so
-            // the new row renders from disk rather than from an optimistic edit.
-            // A refused write comes back as a toast plus the unchanged list.
-            clientServers = await activeInventory.upsertClientServer(
-                name, command, parsedArgs, namespace.isEmpty ? nil : namespace
+            // the new row renders from disk rather than from an optimistic edit,
+            // and the same answer says whether the write landed at all.
+            let written = await activeInventory.upsertClientServer(
+                name, command, parsedArgs, namespace.isEmpty ? nil : namespace, true
             )
-            resetAddForm()
+            await applyClientWrite(written)
+            // A refused write answers with the list still on disk, plus a toast
+            // saying why. Keep the form open with what was typed in it, so the
+            // person can correct the cause and try again.
+            if let refused = mcpClientAddError(name: name, in: written) {
+                addError = refused
+            } else {
+                resetAddForm()
+            }
         }
+    }
+
+    /// Take up a client-run write's answer: the population the core read back,
+    /// and a fresh built-in population beside it.
+    ///
+    /// A client-run server overrides the built-in of the same name, and the core
+    /// derives that override on every read - so an add, a toggle or a remove can
+    /// change which built-in rows render as overridden, and what each one says.
+    /// The per-namespace tool counts are computed from the same rows.
+    private func applyClientWrite(_ servers: [McpClientServer]) async {
+        clientServers = servers
+        builtinServers = await activeInventory.builtinServers()
     }
 
     /// The runner fork, both directions of it.
@@ -353,7 +403,9 @@ struct McpSettingsView: View {
             } else {
                 // This client's own selection only: another client on this Mac
                 // that lists the same server keeps running it.
-                clientServers = await activeInventory.setClientServerEnabled(row.name, enabled)
+                await applyClientWrite(
+                    await activeInventory.setClientServerEnabled(row.name, enabled)
+                )
             }
         }
     }
@@ -383,19 +435,19 @@ struct McpSettingsView: View {
         case .client:
             guard row.kind != .builtIn else { return }
             // Machine-wide: the definition goes for every client on this Mac.
-            clientServers = await activeInventory.removeClientServer(row.name)
+            await applyClientWrite(await activeInventory.removeClientServer(row.name))
         }
     }
 
+    /// Close the add form and empty it. The location is not set here: the open
+    /// button reads it from the connection, which is the only moment it is shown.
     private func resetAddForm() {
         showingAdd = false
-        // Offer the location that can actually be used: while disconnected, only
-        // this Mac can take a new server.
-        newLocation = model.connected ? .daemon : .client
         newName = ""
         newCommand = ""
         newArgs = ""
         newNamespace = ""
+        addError = nil
     }
 }
 

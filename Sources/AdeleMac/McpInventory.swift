@@ -28,8 +28,13 @@ struct McpInventory: Sendable {
     var builtinServers: @Sendable () async -> [McpBuiltinServer]
     /// Add an external client-run server, or edit the one of the same name.
     /// Answers with the refreshed client-run population.
+    ///
+    /// `enabled` sets both grains at once: the definition's own flag and this
+    /// client's surface membership. The caller states it rather than leaning on
+    /// the core's default, because an edit of a switched-off server turns it on,
+    /// and the panel says so in the add form's note before the write.
     var upsertClientServer: @Sendable (_ name: String, _ command: String, _ args: [String],
-        _ namespace: String?) async -> [McpClientServer]
+        _ namespace: String?, _ enabled: Bool) async -> [McpClientServer]
     /// Delete an external client-run definition, for every client on the machine.
     var removeClientServer: @Sendable (_ name: String) async -> [McpClientServer]
     /// Turn an external client-run server on or off for this client alone.
@@ -49,9 +54,10 @@ struct McpInventory: Sendable {
         McpInventory(
             clientServers: { await core.mcpClientServers() },
             builtinServers: { await core.mcpBuiltinServers() },
-            upsertClientServer: { name, command, args, namespace in
+            upsertClientServer: { name, command, args, namespace, enabled in
                 await core.upsertMcpClientServer(
-                    name: name, command: command, args: args, namespace: namespace
+                    name: name, command: command, args: args, namespace: namespace,
+                    enabled: enabled
                 )
             },
             removeClientServer: { await core.removeMcpClientServer(name: $0) },
@@ -65,7 +71,7 @@ struct McpInventory: Sendable {
     static let empty = McpInventory(
         clientServers: { [] },
         builtinServers: { [] },
-        upsertClientServer: { _, _, _, _ in [] },
+        upsertClientServer: { _, _, _, _, _ in [] },
         removeClientServer: { _ in [] },
         setClientServerEnabled: { _, _ in [] }
     )
