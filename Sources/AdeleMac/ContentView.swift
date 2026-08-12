@@ -526,9 +526,14 @@ private struct ComposerView: View {
     @State private var dictation = Dictation()
     @State private var isDictating = false
     @State private var dictationError: String?
-    /// What was in the composer when this dictation session started. Each
-    /// transcript is written on top of it, so dictation never eats typed text.
-    @State private var dictationBase = ""
+    /// The live dictation session: the text each transcript is written on top of,
+    /// the transcript itself, and the conversation the session started in.
+    ///
+    /// An object, not view state. The recognizer's callbacks outlive this draw of
+    /// the composer, so they must read the session as it is now rather than as a
+    /// captured copy of the view saw it. The reference never changes, so the
+    /// question does not arise.
+    @State private var session = DictationSession()
 
     var body: some View {
         @Bindable var model = model
@@ -536,6 +541,17 @@ private struct ComposerView: View {
             // Messages queued while a reply streams (#1), above the live composer.
             QueuedChipsView()
             composer
+        }
+        .onChange(of: model.selectedConversationID) { _, _ in
+            // The composer, its draft and the voice-input flag all belong to the
+            // selected conversation, and this view survives the switch. A session
+            // left running would write what is said next into the conversation
+            // now open, over a draft it never touched. What was dictated stays in
+            // the draft of the conversation it was dictated into (#7).
+            stopDictation()
+        }
+        .onChange(of: model.draft) { _, text in
+            adoptExternalComposerText(text)
         }
         .alert("Dictation", isPresented: Binding(
             get: { dictationError != nil },
@@ -609,7 +625,7 @@ private struct ComposerView: View {
             // Only the empty-draft gate: `sendEnabled` is false while a reply
             // streams, but a send then QUEUES rather than being refused (#1), so
             // the control must stay live.
-            .disabled(model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(promptToSend(draft: model.draft) == nil)
             .help(model.sendEnabled ? "Send" : "Queue this message (a reply is still streaming)")
         }
         .padding(12)
@@ -622,15 +638,40 @@ private struct ComposerView: View {
     /// transcript arrives carrying the words just sent and writes them back into
     /// the cleared composer (adele-mac#42). The microphone keeps running, so
     /// dictating several messages in a row works.
+    ///
+    /// Only a send that happened resets anything. Return pressed on an empty or
+    /// whitespace-only composer sends nothing, and a reset there would cancel a
+    /// spoken sentence out of the recognizer that no one ever received - the
+    /// case where Return arrives in the beat before the first partial.
     private func send() {
-        model.send()
-        dictationBase = dictationBaseAfterSend()
+        guard model.send() else { return }
+        session.consumeOnSend()
         dictation.restart()
+    }
+
+    /// Take composer text that dictation did not write as the session's new base.
+    ///
+    /// A queued message recalled with Up (which takes it out of the queue, so it
+    /// exists nowhere else), a failed prompt offered back, and text typed by hand
+    /// all arrive this way. The transcript would otherwise be written over the
+    /// top of them at the next partial. The recognizer restarts as well: it still
+    /// holds the words the new base now carries, and they would land twice.
+    private func adoptExternalComposerText(_ text: String) {
+        guard isDictating, session.conversationID == model.selectedConversationID else { return }
+        guard session.rebaseIfExternal(composer: text) else { return }
+        dictation.restart()
+    }
+
+    /// Stop a running session. `Dictation` reports the end through `onEnd`, which
+    /// clears the button, the flag and the session.
+    private func stopDictation() {
+        guard isDictating else { return }
+        dictation.stop()
     }
 
     private func toggleDictation() {
         if isDictating {
-            dictation.stop()
+            stopDictation()
             return
         }
         Task {
@@ -639,17 +680,24 @@ private struct ComposerView: View {
                 return
             }
             // Dictation adds to the composer rather than taking it over: each
-            // transcript replaces the one before it, on top of whatever was
-            // typed before the session started.
-            dictationBase = model.draft
-            dictation.onText = { model.draft = dictationDraft(base: dictationBase, transcript: $0) }
+            // transcript replaces the one before it, on top of whatever was in
+            // the composer when the session started.
+            session.begin(base: model.draft, conversationID: model.selectedConversationID)
+            // Written to the session's own conversation, never to the selected
+            // one: a transcript that arrives in the moment between a conversation
+            // switch and the session ending belongs to the conversation it was
+            // spoken into.
+            dictation.onText = { text in
+                model.drafts[session.conversationID] = session.receive(transcript: text)
+            }
             dictation.onEnd = { error in
                 isDictating = false
-                model.setVoiceIn(false)
+                model.setVoiceIn(false, conversationID: session.conversationID)
+                session.end()
                 if let error { dictationError = error }
             }
             isDictating = true
-            model.setVoiceIn(true)
+            model.setVoiceIn(true, conversationID: session.conversationID)
             dictation.start()
         }
     }
