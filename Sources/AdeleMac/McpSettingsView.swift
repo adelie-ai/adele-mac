@@ -204,6 +204,9 @@ struct McpSettingsView: View {
                 }
                 .pickerStyle(.segmented)
                 .help("Choose whether the daemon or this Mac runs the new server")
+                // The last refusal was about the other location, so it says
+                // nothing about the one now selected.
+                .onChange(of: newLocation) { addError = nil }
                 TextField("Name", text: $newName)
                 TextField("Command", text: $newCommand)
                 TextField("Arguments (space or comma separated)", text: $newArgs)
@@ -322,6 +325,7 @@ struct McpSettingsView: View {
     private func add() async {
         adding = true
         defer { adding = false }
+        addError = nil
         let name = newName.trimmingCharacters(in: .whitespaces)
         let command = newCommand.trimmingCharacters(in: .whitespaces)
         let namespace = newNamespace.trimmingCharacters(in: .whitespaces)
@@ -344,7 +348,6 @@ struct McpSettingsView: View {
             // The core answers the write with the population it read back, so
             // the new row renders from disk rather than from an optimistic edit,
             // and the same answer says whether the write landed at all.
-            addError = nil
             let written = await activeInventory.upsertClientServer(
                 name, command, parsedArgs, namespace.isEmpty ? nil : namespace, true
             )

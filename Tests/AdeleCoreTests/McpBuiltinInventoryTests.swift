@@ -406,7 +406,7 @@ import Testing
     /// its event can arrive first. Were the write's caller given it, the panel
     /// would read a landed add as refused, keep the form open, and say the core
     /// refused a write that is on disk.
-    @MainActor @Test func anAddIsJudgedByItsOwnAnswerNotAConcurrentReads() async throws {
+    @MainActor @Test func anAddIsJudgedByItsOwnAnswerNotByAConcurrentRead() async throws {
         try await withConfigHome { _ in
             let core = macCore()
 

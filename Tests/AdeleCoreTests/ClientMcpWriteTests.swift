@@ -274,6 +274,22 @@ import Testing
         #expect(!note.lowercased().contains("replaces it"))
     }
 
+    /// A name held by an HTTP definition overrides no built-in, because the core
+    /// refuses the write before any override can happen. The refusal is what the
+    /// note must report, even though the name also names a built-in.
+    @Test func addNoteReportsTheHttpRefusalAheadOfABuiltinOverride() throws {
+        let builtin = McpBuiltinServer(
+            name: "web", namespace: "web", toolCount: 1, overriddenBy: "web",
+            disabledByConfig: false
+        )
+        let rows = mcpServerRows(
+            daemon: [], client: [clientServer("web", transport: "http")], builtins: [builtin]
+        )
+        let note = try #require(mcpAddNameNote(name: "web", location: .client, rows: rows))
+        #expect(note.lowercased().contains("http"))
+        #expect(!note.lowercased().contains("overrides"))
+    }
+
     /// A server of that name that is switched off here does not "already run
     /// here". The add turns it back on, so the note says that instead.
     @Test func addNoteSaysASwitchedOffServerWillBeTurnedOn() throws {

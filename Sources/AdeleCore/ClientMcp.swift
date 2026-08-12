@@ -153,17 +153,19 @@ public func mcpAddNameNote(
     guard location == .client else { return nil }
 
     let clientRows = rows.filter { $0.runner == .client && $0.name == trimmed }
+    // This form writes a stdio server. The core refuses to apply one over a
+    // definition that reaches its server over HTTP, because that would drop the
+    // endpoint and the authentication with it. The refusal comes first: it
+    // holds even when the name also belongs to a built-in, and it is then the
+    // built-in override that will not happen.
+    if clientRows.contains(where: { $0.kind == .http }) {
+        return "A server here already uses this name over http. This form writes stdio "
+            + "servers, so this add will be refused."
+    }
     if clientRows.contains(where: { $0.kind == .builtIn }) {
         return "This name overrides the built-in server of the same name."
     }
     guard let existing = clientRows.first else { return nil }
-    // This form writes a stdio server. The core refuses to apply it over a
-    // definition that reaches its server over HTTP, because that would drop the
-    // endpoint and the authentication with it.
-    if existing.kind == .http {
-        return "A server of this name here uses http. This form writes stdio servers, "
-            + "so the core refuses the add."
-    }
     // The add writes `enabled`, which sets both the definition's flag and this
     // surface's membership, so an edit of a switched-off server switches it on.
     return mcpClientRowIsOn(existing)

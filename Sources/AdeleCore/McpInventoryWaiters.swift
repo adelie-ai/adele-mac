@@ -21,6 +21,13 @@ import Foundation
 /// The cost is that a read waits behind a write. Both are local file work, and
 /// the panel already awaits each of them.
 ///
+/// The other cost is the answer that never comes. The queue moves on an event,
+/// so an intent the core drops - a closed channel, a task that panics before it
+/// emits - holds the slot, and every later caller then waits for a turn that
+/// does not come. The panel goes with it, because each of its actions awaits
+/// one of these calls. A caller of the queue this replaced was stranded the
+/// same way; its neighbours carried on, one answer out of step.
+///
 /// An event that arrives with no request out is ignored. It leaves the queue as
 /// it is, so the caller whose turn is next still sends, and still waits for its
 /// own answer.
@@ -39,10 +46,12 @@ final class McpInventoryWaiters<Value: Sendable> {
     /// Held across the handover, so a waiting caller cannot be overtaken.
     private var busy = false
 
-    /// How many callers are in the queue: the one waiting for an answer, plus
-    /// the ones waiting for a turn.
+    /// How many callers hold the queue: the one that owns the slot, plus the
+    /// ones waiting for a turn. Counted from ``busy`` rather than from
+    /// ``answering``, so the handover from one caller to the next does not read
+    /// as an empty queue.
     @MainActor
-    var count: Int { (answering == nil ? 0 : 1) + turns.count }
+    var count: Int { (busy ? 1 : 0) + turns.count }
 
     /// Join the queue, send the request when the slot is free, and await the
     /// event that answers it.
